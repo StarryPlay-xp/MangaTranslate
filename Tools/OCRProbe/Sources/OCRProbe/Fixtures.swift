@@ -3,7 +3,7 @@ import CoreText
 import Foundation
 import MangaCore
 
-/// 生成两张合成测试页（日漫竖排气泡、韩漫横排气泡），没有真实样本时用来自测工具
+/// 生成合成测试页（日漫竖排气泡、韩漫横排气泡、条漫长图），没有真实样本时用来自测
 func makeFixtures(in directory: URL) throws {
     let japanese = directory.appendingPathComponent("ja/synthetic-vertical.png")
     try drawPage(width: 1000, height: 1400, to: japanese) { canvas in
@@ -30,7 +30,24 @@ func makeFixtures(in directory: URL) throws {
                        "그날 밤, 모든 것이 바뀌었다.", font: "AppleSDGothicNeo-Regular", size: 36)
     }
 
-    print("已生成测试页：\n  \(japanese.path)\n  \(korean.path)")
+    // 条漫长图：800×4000，会被切成 5 段；第 2～5 个气泡都跨过上一段的切口，用来检查切段去重
+    let long = directory.appendingPathComponent("ko/synthetic-long.png")
+    try drawPage(width: 800, height: 4000, to: long) { canvas in
+        canvas.panel(CGRect(x: 30, y: 30, width: 740, height: 1900))
+        canvas.panel(CGRect(x: 30, y: 2000, width: 740, height: 1970))
+        canvas.bubble(CGRect(x: 150, y: 200, width: 500, height: 220),
+                      "오늘은 날씨가 정말 좋네.", font: "AppleSDGothicNeo-Bold", size: 40, vertical: false)
+        canvas.bubble(CGRect(x: 120, y: 1060, width: 560, height: 240),
+                      "이 말풍선은 경계에 걸쳐 있어.", font: "AppleSDGothicNeo-Bold", size: 40, vertical: false)
+        canvas.bubble(CGRect(x: 180, y: 1900, width: 480, height: 220),
+                      "끝까지 읽어 줘서 고마워.", font: "AppleSDGothicNeo-Bold", size: 38, vertical: false)
+        canvas.bubble(CGRect(x: 140, y: 2800, width: 520, height: 220),
+                      "다음에 또 만나자!", font: "AppleSDGothicNeo-Bold", size: 40, vertical: false)
+        canvas.caption(CGRect(x: 160, y: 3600, width: 480, height: 110),
+                       "다음 화에 계속", font: "AppleSDGothicNeo-Regular", size: 36)
+    }
+
+    print("已生成测试页：\n  \(japanese.path)\n  \(korean.path)\n  \(long.path)")
 }
 
 private func drawPage(width: Int, height: Int, to url: URL, _ draw: (Canvas) -> Void) throws {

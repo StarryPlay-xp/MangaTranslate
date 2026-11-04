@@ -111,12 +111,7 @@ func runTranslate(_ options: TranslateOptions) async throws {
             // 保存要发送的请求（图片内容省略），并把识别原文当作"译文"，用来检查预览图的排版
             let sample = translator.makeRequest(prompt: prompt, markedImage: markedData, omitImage: true)
             try writeFile(sample.jsonData(pretty: true), to: options.output.appendingPathComponent("requests/\(baseName).json"))
-            result.blocks = page.blocks.map { block in
-                var translated = TranslatedBlock(untranslated: block)
-                translated.translation = block.text.replacingOccurrences(of: "\n", with: " ")
-                translated.kind = block.text.isEmpty ? "noise" : "dialogue"
-                return translated
-            }
+            result.blocks = page.blocks.map(TranslatedBlock.dryRun)
             print("  已生成")
         } else if let client {
             let clock = ContinuousClock()

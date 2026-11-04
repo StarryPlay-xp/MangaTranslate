@@ -37,6 +37,14 @@ public struct TranslatedBlock: Codable, Sendable {
         characterSize = sides.isEmpty ? nil : Int(Double(sides[sides.count / 2]) * 0.9)
     }
 
+    /// 试运行用：不调用模型，把识别原文当作"译文"，用来检查识别和贴字效果
+    public static func dryRun(_ block: TextBlock) -> TranslatedBlock {
+        var translated = TranslatedBlock(untranslated: block)
+        translated.translation = block.text.replacingOccurrences(of: "\n", with: " ")
+        translated.kind = block.text.isEmpty ? "noise" : "dialogue"
+        return translated
+    }
+
     /// 需要盖上译文的块
     public var shouldOverlay: Bool { (kind == "dialogue" || kind == "narration") && !translation.isEmpty }
 }
