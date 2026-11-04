@@ -5,55 +5,47 @@ struct BrowserView: View {
     let destination: BrowserDestination
     @Environment(AppSettings.self) private var settings
     @Environment(BookmarkStore.self) private var bookmarks
+    @Environment(ReadingHistory.self) private var history
+    @Environment(\.dismiss) private var dismiss
     @State private var model = BrowserModel()
+    @State private var showingSettings = false
 
     var body: some View {
         WebView(webView: model.webView)
+            .ignoresSafeArea(edges: .bottom)
+            .background(Theme.paper)
             .overlay(alignment: .top) {
-                StatusBanner(status: model.bannerStatus)
-                    .padding(.top, 8)
-                    .animation(.default, value: model.bannerStatus)
+                topBar
+                    .offset(y: model.chromeHidden ? -120 : 0)
             }
-            .navigationTitle(model.title.isEmpty ? "加载中…" : model.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItemGroup(placement: .bottomBar) {
-                    Button {
-                        model.webView.goBack()
-                    } label: {
-                        Image(systemName: "chevron.backward")
+            .overlay(alignment: .bottom) {
+                VStack(spacing: 12) {
+                    if let message = model.message {
+                        MessageBubble(
+                            message: message,
+                            onOpenSettings: {
+                                model.dismissMessage()
+                                showingSettings = true
+                            },
+                            onDismiss: model.dismissMessage)
+                        .transition(.scale(scale: 0.9, anchor: .bottom).combined(with: .opacity))
                     }
-                    .disabled(!model.canGoBack)
-                    .accessibilityLabel("后退")
-
-                    Button {
-                        model.webView.goForward()
-                    } label: {
-                        Image(systemName: "chevron.forward")
-                    }
-                    .disabled(!model.canGoForward)
-                    .accessibilityLabel("前进")
-
-                    Spacer()
-
-                    Button {
-                        settings.autoTranslate.toggle()
-                    } label: {
-                        Label(
-                            settings.autoTranslate ? "自动翻译：开" : "自动翻译：关",
-                            systemImage: settings.autoTranslate ? "character.bubble.fill" : "character.bubble")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(settings.autoTranslate ? Color("AccentColor") : Color.gray)
-
-                    Spacer()
-
-                    moreMenu
+                    bottomBar
+                        .offset(y: model.chromeHidden ? 140 : 0)
                 }
+                .padding(.bottom, 6)
             }
+            .animation(.snappy(duration: 0.28), value: model.chromeHidden)
+            .animation(.snappy(duration: 0.25), value: model.message)
+            .toolbar(.hidden, for: .navigationBar)
+            .sensoryFeedback(.selection, trigger: settings.autoTranslate)
+            .sheet(isPresented: $showingSettings) { SettingsView() }
             .onAppear {
-                model.attach(settings: settings)
+                model.attach(settings: settings, history: history)
                 model.load(destination)
+            }
+            .onDisappear {
+                Task { await model.saveReadingProgress(captureCover: true) }
             }
             .onChange(of: settings.autoTranslate) { _, enabled in
                 model.setAutoTranslate(enabled)
@@ -73,6 +65,78 @@ struct BrowserView: View {
             #endif
     }
 
+    // MARK: - 顶栏：返回书架、标题、加入书架
+
+    private var topBar: some View {
+        HStack(spacing: 4) {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 17, weight: .heavy))
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("返回书架")
+
+            Text(model.title.isEmpty ? "加载中…" : model.title)
+                .font(.system(size: 15, weight: .heavy))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if model.canBookmark, let url = model.currentURL {
+                let saved = bookmarks.contains(url)
+                Button {
+                    Task { await model.toggleBookmark(in: bookmarks) }
+                } label: {
+                    Image(systemName: saved ? "star.fill" : "star")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(saved ? Theme.magenta : Theme.ink)
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel(saved ? "移出书架" : "加入书架")
+            }
+        }
+        .foregroundStyle(Theme.ink)
+        .padding(.horizontal, 4)
+        .background(Theme.paper)
+        .overlay(Rectangle().strokeBorder(Theme.ink, lineWidth: Theme.line))
+        .padding(.horizontal, 12)
+        .padding(.top, 2)
+    }
+
+    // MARK: - 底栏：前进后退、翻译开关、更多
+
+    private var bottomBar: some View {
+        HStack(spacing: 0) {
+            barButton("chevron.backward", label: "后退", enabled: model.canGoBack) { model.webView.goBack() }
+            barButton("chevron.forward", label: "前进", enabled: model.canGoForward) { model.webView.goForward() }
+            Spacer(minLength: 0)
+            moreMenu
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 54)
+        .background(Capsule().fill(Theme.bar))
+        .overlay(Capsule().strokeBorder(Theme.tone.opacity(0.6), lineWidth: 1))
+        .overlay {
+            TranslateToggle(isOn: settings.autoTranslate, isBusy: model.isBusy) {
+                settings.autoTranslate.toggle()
+            }
+            .offset(y: -8)
+        }
+        .padding(.horizontal, 20)
+    }
+
+    private func barButton(_ symbol: String, label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(Color.white.opacity(enabled ? 1 : 0.3))
+                .frame(width: 46, height: 46)
+        }
+        .disabled(!enabled)
+        .accessibilityLabel(label)
+    }
+
     private var moreMenu: some View {
         @Bindable var settings = settings
         return Menu {
@@ -87,47 +151,13 @@ struct BrowserView: View {
             .disabled(model.isTranslatingScreen)
             Button("清除译文", systemImage: "eraser") { model.clearTranslations() }
             Button("刷新", systemImage: "arrow.clockwise") { model.webView.reload() }
-            if let url = model.currentURL, url.scheme?.hasPrefix("http") == true {
-                if bookmarks.contains(url) {
-                    Button("移除书签", systemImage: "star.slash") { bookmarks.remove(url: url) }
-                } else {
-                    Button("加入书签", systemImage: "star") { bookmarks.add(title: model.title, url: url) }
-                }
-            }
+            Button("设置", systemImage: "gearshape") { showingSettings = true }
         } label: {
-            Image(systemName: "ellipsis.circle")
+            Image(systemName: "ellipsis")
+                .font(.system(size: 18, weight: .black))
+                .foregroundStyle(Color.white)
+                .frame(width: 46, height: 46)
         }
         .accessibilityLabel("更多")
-    }
-}
-
-/// 页面顶部的状态提示：进行中显示转圈，完成或失败显示图标
-struct StatusBanner: View {
-    let status: TranslationStatus
-
-    var body: some View {
-        switch status {
-        case .idle:
-            EmptyView()
-        case .working(let text):
-            banner(text) { ProgressView() }
-        case .done(let text):
-            banner(text) { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
-        case .failed(let text):
-            banner(text) { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
-        }
-    }
-
-    private func banner(_ text: String, @ViewBuilder icon: () -> some View) -> some View {
-        HStack(spacing: 8) {
-            icon()
-            Text(text).font(.subheadline)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(.regularMaterial, in: Capsule())
-        .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
-        .padding(.horizontal)
-        .transition(.move(edge: .top).combined(with: .opacity))
     }
 }

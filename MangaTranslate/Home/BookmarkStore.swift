@@ -7,7 +7,7 @@ struct Bookmark: Codable, Hashable, Identifiable {
     var url: URL
 }
 
-/// 书签保存在 UserDefaults 里
+/// 书架上的书签，保存在 UserDefaults；封面缩略图在 ThumbnailStore 里
 @Observable
 final class BookmarkStore {
     private static let key = "bookmarks"
@@ -22,19 +22,15 @@ final class BookmarkStore {
         items.contains { $0.url == url }
     }
 
+    /// 新书签放在最前面
     func add(title: String, url: URL) {
         guard !contains(url) else { return }
-        items.append(Bookmark(title: title.isEmpty ? (url.host() ?? url.absoluteString) : title, url: url))
+        items.insert(Bookmark(title: title.isEmpty ? (url.host() ?? url.absoluteString) : title, url: url), at: 0)
         save()
     }
 
     func remove(url: URL) {
         items.removeAll { $0.url == url }
-        save()
-    }
-
-    func remove(atOffsets offsets: IndexSet) {
-        items.remove(atOffsets: offsets)
         save()
     }
 

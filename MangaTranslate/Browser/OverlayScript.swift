@@ -53,6 +53,21 @@ enum OverlayScript {
             return el;
           };
 
+          // 翻译中的小标记：白底黑框的小气泡，里面三个点依次闪烁；系统开了“减弱动态效果”时不闪
+          const style = document.createElement('style');
+          style.textContent = `
+            @keyframes __mt_blink { 0%, 80%, 100% { opacity: .2 } 40% { opacity: 1 } }
+            .__mt_badge { position: absolute; top: 10px; right: 10px; display: flex; gap: 3px; padding: 6px 7px;
+              background: #fff; border: 1.5px solid #000; border-radius: 10px 10px 10px 2px;
+              opacity: 0; transition: opacity .25s; pointer-events: none; }
+            .__mt_badge span { width: 4px; height: 4px; border-radius: 50%; background: #000;
+              animation: __mt_blink 1.2s infinite; }
+            .__mt_badge span:nth-child(2) { animation-delay: .2s; }
+            .__mt_badge span:nth-child(3) { animation-delay: .4s; }
+            @media (prefers-reduced-motion: reduce) { .__mt_badge span { animation: none; opacity: .6; } }
+          `;
+          (document.head || document.documentElement).appendChild(style);
+
           // ---------- 按图片翻译 ----------
           const images = new Map();  // 图片编号 → { img, box, texts, width }
           let autoEnabled = false;
@@ -154,20 +169,21 @@ enum OverlayScript {
               autoEnabled = enabled;
               if (enabled) scheduleScan();
             },
-            // pending 显示“翻译中”角标；failed 不再自动重试；传空值表示重新排队
+            // pending 时在图片右上角放一个小标记，翻译超过 0.6 秒才显出来，秒出的图不会闪一下；
+            // failed 不再自动重试；传空值表示重新排队
             markState(id, state) {
               const img = imageById(id);
               if (!img) return;
               if (state) img.dataset.mtState = state; else delete img.dataset.mtState;
               const entry = entryFor(id);
               if (!entry) return;
-              entry.box.querySelector('.mt-badge')?.remove();
+              entry.box.querySelector('.__mt_badge')?.remove();
               if (state === 'pending') {
                 const badge = document.createElement('div');
-                badge.className = 'mt-badge';
-                badge.textContent = '翻译中…';
-                badge.style.cssText = 'position:absolute;top:8px;right:8px;padding:3px 8px;border-radius:10px;background:rgba(0,0,0,0.55);color:#fff;font:600 12px -apple-system,sans-serif;';
+                badge.className = '__mt_badge';
+                badge.append(document.createElement('span'), document.createElement('span'), document.createElement('span'));
                 entry.box.appendChild(badge);
+                setTimeout(() => { if (badge.isConnected) badge.style.opacity = '0.9'; }, 600);
               }
               place(id, entry);
               if (!state) scheduleScan();

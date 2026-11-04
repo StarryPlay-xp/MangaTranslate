@@ -22,8 +22,9 @@ final class AutoTranslator {
     @ObservationIgnored var settings: AppSettings?
     /// 单张图失败时的提示
     @ObservationIgnored var onError: ((String) -> Void)?
-    /// 缺少 Key、Key 无效或余额不足时调用：自动翻译已经停下，需要用户处理
-    @ObservationIgnored var onBlocked: ((String) -> Void)?
+    /// 缺少 Key、Key 无效或余额不足时调用：自动翻译已经停下，需要用户处理。
+    /// 第二个参数表示要不要去设置里处理（填写或更换 Key）
+    @ObservationIgnored var onBlocked: ((String, Bool) -> Void)?
 
     @ObservationIgnored private let webView: WKWebView
     @ObservationIgnored private let memoryBank: MemoryBank
@@ -114,7 +115,7 @@ final class AutoTranslator {
         }
         let apiKey = dryRun ? nil : KeychainStore.load()
         if !dryRun && apiKey == nil {
-            block("请先在设置里填写 DeepSeek API Key")
+            block("还没有填写 DeepSeek API Key，自动翻译已暂停", needsSettings: true)
             return
         }
 
@@ -155,22 +156,22 @@ final class AutoTranslator {
         } catch let error as DeepSeekError where error.stopsWholeRun {
             // 去掉“翻译中”角标，问题解决后这张图还能重新翻译
             await mark(candidate.id, state: nil, generation: generation)
-            block(error.localizedDescription)
+            block(error.localizedDescription + "，自动翻译已暂停", needsSettings: error.status == 401)
         } catch {
             logger.error("图片 \(candidate.id, privacy: .public) 翻译失败：\(error.localizedDescription, privacy: .public)")
             if generation == self.generation { handled.insert(candidate.id) }
             await mark(candidate.id, state: "failed", generation: generation)
-            onError?("有一张图翻译失败：\(error.localizedDescription)")
+            onError?(error.localizedDescription)
         }
     }
 
     /// 停止自动翻译并通知界面
-    private func block(_ message: String) {
+    private func block(_ message: String, needsSettings: Bool) {
         guard enabled else { return }
         enabled = false
         queue.removeAll()
         updateCount()
-        onBlocked?(message)
+        onBlocked?(message, needsSettings)
     }
 
     private func render(_ id: String, items: [ImageOverlayItem], generation: Int) async {
