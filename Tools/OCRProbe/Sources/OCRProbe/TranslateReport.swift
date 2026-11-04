@@ -1,4 +1,5 @@
 import Foundation
+import MangaCore
 
 /// 输出 results.json、glossary.json 和 report.html
 func writeTranslateReport(_ run: TranslateRun, to output: URL) throws {

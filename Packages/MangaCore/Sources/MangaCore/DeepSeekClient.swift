@@ -1,20 +1,24 @@
-import Darwin
 import Foundation
 
 /// DeepSeek 的 Chat Completions 接口（OpenAI 兼容格式）
-struct DeepSeekClient: Sendable {
-    let apiKey: String
-    let endpoint = URL(string: "https://api.deepseek.com/chat/completions")!
+public struct DeepSeekClient: Sendable {
+    public let apiKey: String
+    public let endpoint = URL(string: "https://api.deepseek.com/chat/completions")!
 
-    struct Usage: Codable, Sendable {
-        var promptTokens: Int
-        var completionTokens: Int
-        var promptCacheHitTokens: Int?
-        var promptCacheMissTokens: Int?
+    public init(apiKey: String) {
+        self.apiKey = apiKey
+    }
 
-        static let zero = Usage(promptTokens: 0, completionTokens: 0, promptCacheHitTokens: 0, promptCacheMissTokens: 0)
+    public struct Usage: Codable, Sendable {
+        public var promptTokens: Int
+        public var completionTokens: Int
+        public var promptCacheHitTokens: Int?
+        public var promptCacheMissTokens: Int?
 
-        func adding(_ other: Usage) -> Usage {
+        public static let zero = Usage(
+            promptTokens: 0, completionTokens: 0, promptCacheHitTokens: 0, promptCacheMissTokens: 0)
+
+        public func adding(_ other: Usage) -> Usage {
             let hit = (promptCacheHitTokens ?? 0) + (other.promptCacheHitTokens ?? 0)
             return Usage(
                 promptTokens: promptTokens + other.promptTokens,
@@ -24,12 +28,12 @@ struct DeepSeekClient: Sendable {
         }
     }
 
-    struct Reply: Sendable {
-        var content: String
-        var usage: Usage?
+    public struct Reply: Sendable {
+        public var content: String
+        public var usage: Usage?
     }
 
-    func complete(_ request: ChatRequest) async throws -> Reply {
+    public func complete(_ request: ChatRequest) async throws -> Reply {
         var urlRequest = URLRequest(url: endpoint, timeoutInterval: 180)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -68,16 +72,16 @@ struct DeepSeekClient: Sendable {
     }
 }
 
-struct DeepSeekError: LocalizedError {
-    let status: Int
-    let message: String
+public struct DeepSeekError: LocalizedError, Sendable {
+    public let status: Int
+    public let message: String
 
     /// 限流和服务端错误可以重试
-    var isRetryable: Bool { status == 429 || status >= 500 }
-    /// Key 无效、余额不足时后面每页都会失败，直接停止
-    var stopsWholeRun: Bool { status == 401 || status == 402 }
+    public var isRetryable: Bool { status == 429 || status >= 500 }
+    /// Key 无效、余额不足时后面每页都会失败，应直接停止
+    public var stopsWholeRun: Bool { status == 401 || status == 402 }
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         let reason = switch status {
         case 401: "API Key 无效"
         case 402: "账户余额不足"
@@ -89,17 +93,17 @@ struct DeepSeekError: LocalizedError {
     }
 }
 
-struct ChatRequest: Encodable, Sendable {
-    struct Message: Encodable, Sendable {
-        var role: String
-        var content: Content
+public struct ChatRequest: Encodable, Sendable {
+    public struct Message: Encodable, Sendable {
+        public var role: String
+        public var content: Content
     }
 
-    enum Content: Encodable, Sendable {
+    public enum Content: Encodable, Sendable {
         case text(String)
         case parts([Part])
 
-        func encode(to encoder: Encoder) throws {
+        public func encode(to encoder: Encoder) throws {
             var container = encoder.singleValueContainer()
             switch self {
             case .text(let text): try container.encode(text)
@@ -108,58 +112,58 @@ struct ChatRequest: Encodable, Sendable {
         }
     }
 
-    struct Part: Encodable, Sendable {
-        var type: String
-        var text: String?
-        var imageUrl: ImageURL?
+    public struct Part: Encodable, Sendable {
+        public var type: String
+        public var text: String?
+        public var imageUrl: ImageURL?
 
-        static func text(_ text: String) -> Part { Part(type: "text", text: text) }
+        public static func text(_ text: String) -> Part { Part(type: "text", text: text) }
 
         /// detail 用 high 保留原图；low 会缩到 512×512，漫画上的字会糊掉。
-        /// omitted 为 true 时不放图片内容，只用于试运行时保存请求示例
-        static func jpeg(_ data: Data, omitted: Bool = false) -> Part {
+        /// omitted 为 true 时不放图片内容，只用于保存请求示例
+        public static func jpeg(_ data: Data, omitted: Bool = false) -> Part {
             let payload = omitted ? "<省略 \(data.count) 字节的图片>" : data.base64EncodedString()
             return Part(type: "image_url", imageUrl: ImageURL(url: "data:image/jpeg;base64," + payload, detail: "high"))
         }
     }
 
-    struct ImageURL: Encodable, Sendable {
-        var url: String
-        var detail: String
+    public struct ImageURL: Encodable, Sendable {
+        public var url: String
+        public var detail: String
     }
 
-    struct ResponseFormat: Encodable, Sendable { var type = "json_object" }
-    struct Thinking: Encodable, Sendable { var type: String }
+    public struct ResponseFormat: Encodable, Sendable { public var type = "json_object" }
+    public struct Thinking: Encodable, Sendable { public var type: String }
 
-    var model: String
-    var messages: [Message]
-    var responseFormat = ResponseFormat()
-    var thinking: Thinking
-    var maxTokens: Int
-    var stream = false
+    public var model: String
+    public var messages: [Message]
+    public var responseFormat = ResponseFormat()
+    public var thinking: Thinking
+    public var maxTokens: Int
+    public var stream = false
 
-    func jsonData(pretty: Bool = false) throws -> Data {
+    public func jsonData(pretty: Bool = false) throws -> Data {
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
-        if pretty { encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes] }
+        if pretty { encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes] }
         return try encoder.encode(self)
     }
 }
 
 /// deepseek-flash 的官方价格（美元 / 百万 token），2026-11-04 核实，以后可能调整
-enum DeepSeekPricing {
-    struct Rates {
-        var cacheHitInput: Double
-        var cacheMissInput: Double
-        var output: Double
+public enum DeepSeekPricing {
+    public struct Rates: Sendable {
+        public var cacheHitInput: Double
+        public var cacheMissInput: Double
+        public var output: Double
     }
 
-    static let pricedModel = "deepseek-flash"
-    static let offPeak = Rates(cacheHitInput: 0.003, cacheMissInput: 0.15, output: 0.6)
-    static let peak = Rates(cacheHitInput: 0.006, cacheMissInput: 0.3, output: 1.2)
+    public static let pricedModel = "deepseek-flash"
+    public static let offPeak = Rates(cacheHitInput: 0.003, cacheMissInput: 0.15, output: 0.6)
+    public static let peak = Rates(cacheHitInput: 0.006, cacheMissInput: 0.3, output: 1.2)
 
     /// 高峰时段：工作日 UTC 01–04 点和 06–10 点（北京时间 9–12 点、14–18 点）；这里没有扣除中国法定节假日
-    static func isPeak(_ date: Date) -> Bool {
+    public static func isPeak(_ date: Date) -> Bool {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC")!
         let weekday = calendar.component(.weekday, from: date)  // 1 是周日
@@ -167,27 +171,11 @@ enum DeepSeekPricing {
         return (2...6).contains(weekday) && ((1..<4).contains(hour) || (6..<10).contains(hour))
     }
 
-    static func cost(of usage: DeepSeekClient.Usage, peak: Bool) -> Double {
+    public static func cost(of usage: DeepSeekClient.Usage, peak: Bool) -> Double {
         let rates = peak ? Self.peak : offPeak
         let hit = Double(usage.promptCacheHitTokens ?? 0)
         let miss = Double(usage.promptTokens) - hit
         return (hit * rates.cacheHitInput + miss * rates.cacheMissInput + Double(usage.completionTokens) * rates.output)
             / 1_000_000
     }
-}
-
-/// 优先读环境变量 DEEPSEEK_API_KEY；没有就在终端里提示输入（输入时不显示，也不会保存）
-func readDeepSeekAPIKey() throws -> String {
-    if let key = ProcessInfo.processInfo.environment["DEEPSEEK_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines),
-       !key.isEmpty {
-        return key
-    }
-    var buffer = [CChar](repeating: 0, count: 512)
-    guard readpassphrase("请粘贴 DeepSeek API Key（输入时不会显示）：", &buffer, buffer.count, RPP_REQUIRE_TTY) != nil else {
-        throw ProbeError("没有读到 API Key。请在终端里运行，或先设置环境变量 DEEPSEEK_API_KEY")
-    }
-    let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
-    let key = String(decoding: bytes, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !key.isEmpty else { throw ProbeError("API Key 为空") }
-    return key
 }

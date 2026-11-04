@@ -1,32 +1,42 @@
 import CoreGraphics
 import Foundation
 
-enum ReadingOrder: String, Codable, Sendable {
+public enum ReadingOrder: String, Codable, Sendable {
     /// 日漫：从上到下，同一行内从右到左
     case rightToLeft
     /// 韩漫条漫：从上到下，同一行内从左到右
     case leftToRight
 }
 
-enum TextDirection: String, Codable, Sendable {
+/// 漫画的原文语言，决定 Vision 的识别语言和文字块的阅读顺序
+public enum SourceLanguage: String, Codable, Sendable, CaseIterable {
+    case japanese
+    case korean
+
+    public var recognitionLanguages: [String] { self == .japanese ? ["ja-JP"] : ["ko-KR"] }
+    public var readingOrder: ReadingOrder { self == .japanese ? .rightToLeft : .leftToRight }
+    public var displayName: String { self == .japanese ? "日语" : "韩语" }
+}
+
+public enum TextDirection: String, Codable, Sendable {
     case vertical, horizontal
 }
 
 /// 合并后的文字块，通常对应一个气泡或一段旁白；App 里每块对应一处译文
-struct TextBlock: Codable, Sendable {
+public struct TextBlock: Codable, Sendable {
     /// 按阅读顺序的编号，从 1 开始
-    var id: Int
-    var box: Box
-    var direction: TextDirection
+    public var id: Int
+    public var box: Box
+    public var direction: TextDirection
     /// 块内各行按阅读顺序拼接；为空表示只检测到位置、没认出字
-    var text: String
+    public var text: String
     /// 块内识别结果的平均置信度；没认出字时为 nil
-    var confidence: Double?
-    var lines: [TextLine]
+    public var confidence: Double?
+    public var lines: [TextLine]
 }
 
 /// 把相距很近的文字区域和识别行合并成文字块，并按阅读顺序编号
-func groupIntoBlocks(_ analysis: TextAnalysis, gapFactor: Double, order: ReadingOrder) -> [TextBlock] {
+public func groupIntoBlocks(_ analysis: TextAnalysis, gapFactor: Double, order: ReadingOrder) -> [TextBlock] {
     let gap = analysis.characterSize * gapFactor
     let regions = mergeNearby(analysis.regions + analysis.lines.map(\.box.rect), gap: gap)
 

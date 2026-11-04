@@ -1,4 +1,5 @@
 import Foundation
+import MangaCore
 
 @main
 struct OCRProbe {
@@ -15,7 +16,8 @@ struct OCRProbe {
                 guard args.count == 1 else { throw ProbeError("用法：ocrprobe fixtures <输出目录>") }
                 try makeFixtures(in: URL(fileURLWithPath: args[0]))
             case "languages":
-                printSupportedLanguages()
+                print("Vision 文字识别支持的语言：")
+                supportedRecognitionLanguages().forEach { print("  \($0)") }
             default:
                 print(usage)
             }

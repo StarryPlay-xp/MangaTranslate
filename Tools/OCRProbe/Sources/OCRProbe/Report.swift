@@ -1,4 +1,5 @@
 import Foundation
+import MangaCore
 
 /// 输出 results.json（下一步发给 DeepSeek 时使用）和 report.html（人工查看）
 func writeReport(_ pages: [PageResult], to output: URL) throws {

@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import MangaCore
 
 struct PageResult: Codable, Sendable {
     /// 相对输入目录的路径

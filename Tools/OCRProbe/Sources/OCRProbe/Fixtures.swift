@@ -1,6 +1,7 @@
 import CoreGraphics
 import CoreText
 import Foundation
+import MangaCore
 
 /// 生成两张合成测试页（日漫竖排气泡、韩漫横排气泡），没有真实样本时用来自测工具
 func makeFixtures(in directory: URL) throws {
