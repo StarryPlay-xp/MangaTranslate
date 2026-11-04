@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+
+# 验证用的漫画截图和各种生成结果，不进仓库
+samples/*
+!samples/README.md
+output/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Xcode
+DerivedData/
+build/
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+
+# 本地密钥和配置，以防万一
+*.env
+.env*
+Secrets.xcconfig
