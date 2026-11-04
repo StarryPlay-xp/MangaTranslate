@@ -6,6 +6,8 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var keyInput = ""
     @State private var keyMessage: String?
+    @State private var cacheSize = TranslationCache.sizeInBytes()
+    @State private var storageMessage: String?
 
     var body: some View {
         @Bindable var settings = settings
@@ -42,12 +44,33 @@ struct SettingsView: View {
                             Text(language.displayName).tag(language)
                         }
                     }
-                    Toggle("把截图发给模型", isOn: $settings.sendImage)
+                    Toggle("自动翻译", isOn: $settings.autoTranslate)
+                    Toggle("把图片发给模型", isOn: $settings.sendImage)
                     Toggle("试运行（不调用 DeepSeek）", isOn: $settings.dryRun)
                 } header: {
                     Text("翻译")
                 } footer: {
-                    Text("发送截图时，模型会对照画面核对原文，译文更准确。试运行只在原位置显示识别出的原文，用来检查识别效果，不联网。")
+                    Text("自动翻译会在浏览时翻译屏幕上和下方 1.5 屏以内的漫画图片，滑到时译文通常已经准备好。发送图片时，模型会对照画面核对原文，译文更准确。试运行只在原位置显示识别出的原文，用来检查识别效果，不联网。")
+                }
+
+                Section {
+                    LabeledContent("译文缓存", value: ByteCountFormatter.string(fromByteCount: Int64(cacheSize), countStyle: .file))
+                    Button("清除译文缓存", role: .destructive) {
+                        TranslationCache.clear()
+                        cacheSize = TranslationCache.sizeInBytes()
+                        storageMessage = "已清除译文缓存"
+                    }
+                    Button("清除术语记忆", role: .destructive) {
+                        MemoryBank.clearAll()
+                        storageMessage = "已清除术语记忆，重新打开网页后生效"
+                    }
+                    if let storageMessage {
+                        Text(storageMessage).font(.footnote).foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("存储")
+                } footer: {
+                    Text("翻译过的图片会缓存译文，重看时直接显示、不再花钱。术语记忆按网站保存人名等专有名词的译法，让前后译名一致。")
                 }
 
                 Section {
@@ -56,7 +79,7 @@ struct SettingsView: View {
                 } header: {
                     Text("关于")
                 } footer: {
-                    Text("点“翻译这一屏”时，当前屏幕的截图（带编号框）和识别出的文字会发送到 DeepSeek（api.deepseek.com）。")
+                    Text("翻译时，漫画图片（带编号框）和识别出的文字会发送到 DeepSeek（api.deepseek.com）。")
                 }
             }
             .navigationTitle("设置")

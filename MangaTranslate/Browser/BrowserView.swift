@@ -10,9 +10,9 @@ struct BrowserView: View {
     var body: some View {
         WebView(webView: model.webView)
             .overlay(alignment: .top) {
-                StatusBanner(status: model.status)
+                StatusBanner(status: model.bannerStatus)
                     .padding(.top, 8)
-                    .animation(.default, value: model.status)
+                    .animation(.default, value: model.bannerStatus)
             }
             .navigationTitle(model.title.isEmpty ? "加载中…" : model.title)
             .navigationBarTitleDisplayMode(.inline)
@@ -37,24 +37,34 @@ struct BrowserView: View {
                     Spacer()
 
                     Button {
-                        Task { await model.translateVisibleArea(settings: settings) }
+                        settings.autoTranslate.toggle()
                     } label: {
-                        Label("翻译这一屏", systemImage: "character.bubble")
-                            .labelStyle(.titleAndIcon)
+                        Label(
+                            settings.autoTranslate ? "自动翻译：开" : "自动翻译：关",
+                            systemImage: settings.autoTranslate ? "character.bubble.fill" : "character.bubble")
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(model.isTranslating)
+                    .tint(settings.autoTranslate ? Color("AccentColor") : Color.gray)
 
                     Spacer()
 
                     moreMenu
                 }
             }
-            .onAppear { model.load(destination) }
+            .onAppear {
+                model.attach(settings: settings)
+                model.load(destination)
+            }
+            .onChange(of: settings.autoTranslate) { _, enabled in
+                model.setAutoTranslate(enabled)
+            }
+            .onChange(of: settings.sourceLanguage) {
+                model.retranslateAll()
+            }
             #if DEBUG
             .onChange(of: model.finishedLoads) { _, count in
-                // 调试用：启动参数带 -autoTranslate 时，页面加载完自动翻译一次
-                guard count == 1, ProcessInfo.processInfo.arguments.contains("-autoTranslate") else { return }
+                // 调试用：启动参数带 -translateScreen 时，页面加载完执行一次"只翻译这一屏"
+                guard count == 1, ProcessInfo.processInfo.arguments.contains("-translateScreen") else { return }
                 Task {
                     try? await Task.sleep(for: .seconds(1))
                     await model.translateVisibleArea(settings: settings)
@@ -71,6 +81,10 @@ struct BrowserView: View {
                     Text(language.displayName).tag(language)
                 }
             }
+            Button("只翻译这一屏", systemImage: "rectangle.dashed") {
+                Task { await model.translateVisibleArea(settings: settings) }
+            }
+            .disabled(model.isTranslatingScreen)
             Button("清除译文", systemImage: "eraser") { model.clearTranslations() }
             Button("刷新", systemImage: "arrow.clockwise") { model.webView.reload() }
             if let url = model.currentURL, url.scheme?.hasPrefix("http") == true {
