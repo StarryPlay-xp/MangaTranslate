@@ -112,8 +112,8 @@ enum OverlayScript {
               if (!img.complete || img.naturalWidth < 300 || img.naturalHeight < 200) continue;
               const rect = img.getBoundingClientRect();
               if (rect.width < viewWidth * 0.5 || rect.height < 100) continue;
-              // 又矮、原图又小的多半是封面或横幅
-              if (rect.height < 200 && img.naturalWidth < 600) continue;
+              // 又矮、原图又小的多半是封面；又矮、放在链接里的多半是推广横幅
+              if (rect.height < 200 && (img.naturalWidth < 600 || img.closest('a[href]'))) continue;
               if (rect.bottom < 0) continue;
               // 左右翻页的阅读器把各页横着排开，完全在屏幕左右两侧外面的（别的页、广告页）翻到了再说
               if (rect.right <= 0 || rect.left >= viewWidth) continue;
