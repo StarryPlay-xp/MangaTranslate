@@ -29,7 +29,7 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
     private(set) var currentURL: URL?
     private(set) var canGoBack = false
     private(set) var canGoForward = false
-    /// 往下滑时收起上下工具栏，往上滑或回到顶部时再出现
+    /// 往下滑或左右翻页时收起上下工具栏，往上滑、回到顶部或点屏幕中间时再出现
     private(set) var chromeHidden = false
     private(set) var message: BrowserMessage?
     private(set) var isTranslatingScreen = false
@@ -49,7 +49,10 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
     @ObservationIgnored private var messageTask: Task<Void, Never>?
     /// 当前提示气泡里累计的失败张数，合并成一条提示
     @ObservationIgnored private var failureCount = 0
+    /// 上一次收起或放出工具栏时的滚动位置
     @ObservationIgnored private var lastOffsetY: CGFloat = 0
+    /// 上一次收到滚动通知时的位置（不含回弹）
+    @ObservationIgnored private var lastSeenOffsetY: CGFloat = 0
     @ObservationIgnored private var progressTask: Task<Void, Never>?
     @ObservationIgnored private var lastThumbnailAt = Date.distantPast
     @ObservationIgnored private var pendingRestoreY: Double?
@@ -59,6 +62,10 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
         let controller = configuration.userContentController
         controller.addUserScript(WKUserScript(
             source: OverlayScript.source, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: .defaultClient))
+        // 手势脚本要进每个 frame：有的阅读器放在 iframe 里；尽早注入，抢在网页自己的触摸监听之前
+        controller.addUserScript(WKUserScript(
+            source: ChromeGestureScript.source, injectionTime: .atDocumentStart, forMainFrameOnly: false,
+            in: .defaultClient))
         let proxy = ScriptMessageProxy()
         controller.add(proxy, contentWorld: .defaultClient, name: OverlayScript.messageHandlerName)
         let webView = WKWebView(frame: .zero, configuration: configuration)
@@ -210,10 +217,22 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
         struct Message: Decodable {
             var type: String
             var items: [ImageCandidate]?
+            var action: String?
         }
         guard let message = try? JSONDecoder().decode(Message.self, from: Data(body.utf8)) else { return }
-        if message.type == "candidates" {
+        switch message.type {
+        case "candidates":
             autoTranslator.receive(message.items ?? [])
+        case "chrome":
+            // 网页里的手势：翻页时收起工具栏，点屏幕中间切换（见 ChromeGestureScript）
+            switch message.action {
+            case "hide": chromeHidden = true
+            case "show": chromeHidden = false
+            case "toggle": chromeHidden.toggle()
+            default: break
+            }
+        default:
+            break
         }
     }
 
@@ -331,9 +350,14 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     // MARK: - 私有方法
 
-    /// 往下滑超过一点距离就收起工具栏，往上滑或接近顶部就放出来；停下 1 秒后记下阅读位置
+    /// 往下滑超过一点距离就收起工具栏，往上滑或接近顶部就放出来；停下 1 秒后记下阅读位置。
+    /// 拉过头的回弹不算滚动：不能上下滚动的网页（比如左右翻页的阅读器）y 始终是 0，
+    /// 不然一回弹就会被当成"回到顶部"把工具栏放出来，这类网页交给 ChromeGestureScript 处理
     private func didScroll(_ scrollView: UIScrollView) {
-        let y = scrollView.contentOffset.y
+        let maxY = max(scrollView.contentSize.height - scrollView.bounds.height, 0)
+        let y = min(max(scrollView.contentOffset.y, 0), maxY)
+        guard y != lastSeenOffsetY else { return }
+        lastSeenOffsetY = y
         let delta = y - lastOffsetY
         if y < 40 {
             chromeHidden = false
