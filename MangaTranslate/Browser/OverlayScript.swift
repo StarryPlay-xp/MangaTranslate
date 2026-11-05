@@ -132,18 +132,20 @@ enum OverlayScript {
           // 找出屏幕上和下方 3 屏以内、已经加载好的大图，按离屏幕的远近报给 App。
           // 左右翻页的阅读器把各页横着排开：屏幕左右两侧外面的图，只有和屏幕上的漫画页一样大、
           // 离屏幕不到 2.5 屏宽（前后各约 3 页）的才提前翻，排在屏幕上的图之后；尺寸不同的（广告页、推荐位）翻到了再说。
-          // canvas 只在完整停在屏幕上 0.15 秒后才报，还在动（翻页动画）就 0.1 秒后再看
+          // canvas 只在完整停在屏幕上 0.15 秒后才报，还在动（翻页动画）就 0.1 秒后再看。
+          // 显示宽度不到屏幕短边一半的不算漫画页：竖屏时就是半屏宽；iPad 横屏时单页、两页并排都不到半屏宽，按短边才认得出
           const scan = () => {
             scanTimer = null;
             if (!autoEnabled) return;
             const viewWidth = window.innerWidth;
             const viewHeight = window.innerHeight;
+            const minPageWidth = Math.min(viewWidth, viewHeight) * 0.5;
             const items = [];
             const pages = [];
             for (const img of document.images) {
               if (!img.complete || img.naturalWidth < 300 || img.naturalHeight < 200) continue;
               const rect = img.getBoundingClientRect();
-              if (rect.width < viewWidth * 0.5 || rect.height < 100) continue;
+              if (rect.width < minPageWidth || rect.height < 100) continue;
               // 又矮、原图又小的多半是封面；又矮、放在链接里的多半是推广横幅
               if (rect.height < 200 && (img.naturalWidth < 600 || img.closest('a[href]'))) continue;
               if (rect.bottom < 0) continue;
@@ -173,7 +175,7 @@ enum OverlayScript {
             for (const canvas of document.querySelectorAll('canvas')) {
               if (canvas.dataset.mtState || canvas.width < 300 || canvas.height < 200) continue;
               const rect = canvas.getBoundingClientRect();
-              if (rect.width < viewWidth * 0.5 || rect.height < 200) continue;
+              if (rect.width < minPageWidth || rect.height < 200) continue;
               if (!canvas.dataset.mtId) canvas.dataset.mtId = String(++nextId);
               const id = canvas.dataset.mtId;
               const key = rectKey(rect);

@@ -11,6 +11,7 @@ struct HomeView: View {
     @Environment(BookmarkStore.self) private var bookmarks
     @Environment(ReadingHistory.self) private var history
     @Environment(AppSettings.self) private var settings
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var path: [BrowserDestination] = []
     @State private var address = ""
     @State private var showingSettings = false
@@ -28,6 +29,9 @@ struct HomeView: View {
                     shelfSection
                 }
                 .padding(.horizontal, Theme.pageMargin)
+                // iPad 上不铺满屏幕，居中成一栏
+                .frame(maxWidth: Theme.contentMaxWidth + Theme.pageMargin * 2)
+                .frame(maxWidth: .infinity)
                 .padding(.bottom, 40)
             }
             .scrollDismissesKeyboard(.interactively)
@@ -133,25 +137,9 @@ struct HomeView: View {
             Button {
                 path.append(.resume(recent.url, scrollY: recent.scrollY))
             } label: {
-                VStack(alignment: .leading, spacing: 0) {
-                    PageCover(url: recent.url)
-                        .frame(height: 190)
-                    Rectangle().fill(Theme.ink).frame(height: Theme.line)
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(recent.title.isEmpty ? (recent.url.host() ?? "上次看的页面") : recent.title)
-                            .font(.system(size: 18, weight: .heavy))
-                            .foregroundStyle(Theme.ink)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                        Text("\(recent.url.host() ?? "")，\(Self.relative(recent.visitedAt))看到这里")
-                            .font(.panelCaption)
-                            .foregroundStyle(Theme.muted)
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .panel(shadow: true)
-                .padding(.trailing, 6)
+                continueCard(recent)
+                    .panel(shadow: true)
+                    .padding(.trailing, 6)
             }
             .buttonStyle(PanelButtonStyle())
             .contextMenu {
@@ -162,6 +150,44 @@ struct HomeView: View {
             }
         }
     }
+
+    /// 手机上封面在上、文字在下；iPad 上封面在左、文字在右，免得封面被拉成一长条
+    @ViewBuilder
+    private func continueCard(_ recent: RecentPage) -> some View {
+        let caption = VStack(alignment: .leading, spacing: 5) {
+            Text(recent.title.isEmpty ? (recent.url.host() ?? "上次看的页面") : recent.title)
+                .font(.system(size: 18, weight: .heavy))
+                .foregroundStyle(Theme.ink)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+            Text("\(recent.url.host() ?? "")，\(Self.relative(recent.visitedAt))看到这里")
+                .font(.panelCaption)
+                .foregroundStyle(Theme.muted)
+        }
+        if isWide {
+            HStack(spacing: 0) {
+                PageCover(url: recent.url)
+                    .frame(width: 320)
+                Rectangle().fill(Theme.ink).frame(width: Theme.line)
+                caption
+                    .padding(18)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+            .frame(height: 200)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                PageCover(url: recent.url)
+                    .frame(height: 190)
+                Rectangle().fill(Theme.ink).frame(height: Theme.line)
+                caption
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    /// iPad 全屏或较宽的窗口
+    private var isWide: Bool { sizeClass == .regular }
 
     // MARK: - 书架
 
@@ -181,7 +207,7 @@ struct HomeView: View {
                             Rectangle().strokeBorder(Theme.ink, style: StrokeStyle(lineWidth: Theme.thinLine, dash: [6, 5])))
                 }
                 ForEach(Array(shelfRows.enumerated()), id: \.offset) { index, row in
-                    SplitRow(leadingFraction: index.isMultiple(of: 2) ? 0.58 : 0.42, spacing: Theme.gutter) {
+                    PanelRow(fractions: shelfFractions(row: index), spacing: Theme.gutter) {
                         ForEach(row) { bookmark in
                             Button {
                                 path.append(.web(bookmark.url))
@@ -197,18 +223,28 @@ struct HomeView: View {
                             }
                         }
                     }
-                    .frame(height: 210)
+                    .frame(height: isWide ? 240 : 210)
                 }
                 demoPanel
             }
         }
     }
 
-    /// 书签两个一行
+    /// 书签手机上两个一行，iPad 上三个一行
     private var shelfRows: [[Bookmark]] {
-        stride(from: 0, to: bookmarks.items.count, by: 2).map {
-            Array(bookmarks.items[$0..<min($0 + 2, bookmarks.items.count)])
+        let columns = isWide ? 3 : 2
+        return stride(from: 0, to: bookmarks.items.count, by: columns).map {
+            Array(bookmarks.items[$0..<min($0 + columns, bookmarks.items.count)])
         }
+    }
+
+    /// 各格宽度的比例，隔行换一下宽格的位置，排出分镜的错落感
+    private func shelfFractions(row: Int) -> [CGFloat] {
+        let even = row.isMultiple(of: 2)
+        if isWide {
+            return even ? [0.42, 0.29, 0.29] : [0.29, 0.29, 0.42]
+        }
+        return even ? [0.58, 0.42] : [0.42, 0.58]
     }
 
     private var demoPanel: some View {

@@ -35,6 +35,8 @@ struct BrowserView: View {
                     bottomBar
                         .offset(y: model.chromeHidden ? 140 : 0)
                 }
+                // iPad 上底栏和提示不铺满屏幕宽度
+                .frame(maxWidth: 560)
                 .padding(.bottom, 6)
             }
             .animation(.snappy(duration: 0.28), value: model.chromeHidden)

@@ -13,5 +13,14 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<!-- iPad 上只开一个窗口：每个窗口各有一份请求名额，开多个会成倍发请求；自动翻译开关也是各窗口共用的。
+	     项目设置里关掉了 UIApplicationSceneManifest 的自动生成，否则生成的会把这里改回支持多窗口 -->
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict/>
+	</dict>
 </dict>
 </plist>

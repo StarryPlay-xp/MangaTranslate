@@ -19,6 +19,8 @@ enum Theme {
     /// 分镜格之间的间距
     static let gutter: CGFloat = 10
     static let pageMargin: CGFloat = 16
+    /// 首页内容最宽多少：iPad 上不铺满整个屏幕，居中显示
+    static let contentMaxWidth: CGFloat = 960
 }
 
 extension Font {

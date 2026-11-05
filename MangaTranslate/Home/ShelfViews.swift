@@ -59,27 +59,33 @@ struct ShelfPanel: View {
     }
 }
 
-/// 一行两格，左右宽度按比例分；书架隔行交换宽窄，排出漫画分镜那种错落感
-struct SplitRow: Layout {
-    var leadingFraction: CGFloat
+/// 一行几格，宽度按比例分；书架隔行换宽格的位置，排出漫画分镜那种错落感。
+/// 这一行不满时，按已有几格的比例分满整行（只剩一格就占满）
+struct PanelRow: Layout {
+    var fractions: [CGFloat]
     var spacing: CGFloat
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let width = proposal.width ?? 320
-        let height = proposal.height ?? subviews.map { $0.sizeThatFits(.init(width: width / 2, height: nil)).height }.max() ?? 0
+        let column = width / CGFloat(max(subviews.count, 1))
+        let height = proposal.height ?? subviews.map { $0.sizeThatFits(.init(width: column, height: nil)).height }.max() ?? 0
         return CGSize(width: width, height: height)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        guard subviews.count >= 2 else {
-            subviews.first?.place(at: bounds.origin, proposal: .init(width: bounds.width, height: bounds.height))
-            return
+        guard !subviews.isEmpty else { return }
+        let shares = (0..<subviews.count).map { $0 < fractions.count ? fractions[$0] : (fractions.last ?? 1) }
+        let total = shares.reduce(0, +)
+        let available = bounds.width - spacing * CGFloat(subviews.count - 1)
+        var x = bounds.minX
+        for (index, subview) in subviews.enumerated() {
+            // 最后一格补齐取整误差，右边缘和上下对齐
+            let width = index == subviews.count - 1
+                ? bounds.maxX - x
+                : (available * shares[index] / total).rounded()
+            subview.place(at: CGPoint(x: x, y: bounds.minY), proposal: .init(width: width, height: bounds.height))
+            x += width + spacing
         }
-        let leading = ((bounds.width - spacing) * leadingFraction).rounded()
-        subviews[0].place(at: bounds.origin, proposal: .init(width: leading, height: bounds.height))
-        subviews[1].place(
-            at: CGPoint(x: bounds.minX + leading + spacing, y: bounds.minY),
-            proposal: .init(width: bounds.width - leading - spacing, height: bounds.height))
     }
 }
 

@@ -64,6 +64,8 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     override init() {
         let configuration = WKWebViewConfiguration()
+        // iPad 默认会请求电脑版网页，窗口变窄时又换回手机版；漫画网站的适配都是按手机版做的，固定请求手机版
+        configuration.defaultWebpagePreferences.preferredContentMode = .mobile
         let controller = configuration.userContentController
         controller.addUserScript(WKUserScript(
             source: OverlayScript.source, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: .defaultClient))

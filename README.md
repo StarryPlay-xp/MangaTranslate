@@ -1,30 +1,35 @@
 # 漫译（MangaTranslate）
 
-自用的 iPhone App：在 App 内置的浏览器里看日漫、韩漫网页，先用 Apple Vision 在手机上找出文字，再交给大模型看图翻译成简体中文，最后把译文贴回原来的位置。大模型服务可以自己配置：默认是 DeepSeek，也能换成其他 OpenAI 兼容或 Anthropic 格式的服务，或者局域网里自己部署的模型。
+自用的 iPhone / iPad App：在 App 内置的浏览器里看日漫、韩漫网页，先用 Apple Vision 在设备上找出文字，再交给大模型看图翻译成简体中文，最后把译文贴回原来的位置。大模型服务可以自己配置：默认是 DeepSeek，也能换成其他 OpenAI 兼容或 Anthropic 格式的服务，或者局域网里自己部署的模型。
 
 ## 目录结构
 
 - `MangaTranslate.xcodeproj`、`MangaTranslate/`：iOS App
 - `Packages/MangaCore/`：App 和验证工具共用的核心逻辑（文字识别、合并文字块、编号图、大模型翻译）
-- `Config/Info.plist`：Info.plist 里写不进项目设置的部分（允许用 http:// 访问局域网），编译时自动合并
+- `Config/Info.plist`：Info.plist 里写不进项目设置的部分（允许用 http:// 访问局域网、iPad 上只开一个窗口），编译时自动合并
 - `Tools/OCRProbe/`：Mac 上的识别与翻译验证工具，用法见它的 README
 - `samples/`：验证用的截图，不提交到仓库
 
 ## 在模拟器里运行
 
 1. 用 Xcode 打开 `MangaTranslate.xcodeproj`
-2. 窗口顶部选择 `MangaTranslate` 和一台 iPhone 模拟器，按 ⌘R 运行
+2. 窗口顶部选择 `MangaTranslate` 和一台 iPhone 或 iPad 模拟器，按 ⌘R 运行
 3. 首页点"内置示例页"。在设置里打开"试运行"，可以不联网先检查识别和贴字效果
 
-## 装到自己的 iPhone（免费 Apple ID）
+## 装到自己的 iPhone 或 iPad（免费 Apple ID）
 
 1. Xcode → Settings → Accounts，添加自己的 Apple ID
 2. 在左侧选中项目 → TARGETS 里的 `MangaTranslate` → Signing & Capabilities，Team 选自己的 Personal Team。如果提示 Bundle Identifier 已被占用，改成一个别人不会用的名字
-3. 用数据线连接 iPhone，在 Xcode 顶部选择这台 iPhone，按 ⌘R 运行
-4. 第一次安装需要在 iPhone 上操作：设置 → 隐私与安全性 → 打开"开发者模式"并重启；然后在 设置 → 通用 → VPN 与设备管理 里信任自己的开发者证书
+3. 用数据线连接 iPhone 或 iPad，在 Xcode 顶部选择这台设备，按 ⌘R 运行
+4. 第一次安装需要在设备上操作：设置 → 隐私与安全性 → 打开"开发者模式"并重启；然后在 设置 → 通用 → VPN 与设备管理 里信任自己的开发者证书
 5. 免费签名 7 天后失效，到时连上 Mac 再运行一次就行，App 里的数据一般不会丢
 
 选好 Team 后，项目文件里会多出一行 `DEVELOPMENT_TEAM`。这是开发者团队编号，不是密钥，提交到仓库没有问题。
+
+iPad 上的区别：
+- 支持横屏、竖屏和随意调整窗口大小（iPhone 上仍只支持竖屏）。横屏时一屏一页、两页并排的阅读器都能自动翻译
+- 只能开一个窗口，开多个窗口会成倍发翻译请求
+- 网页固定按手机版打开。iPad 上的 Safari 默认打开电脑版网页，所以同一个网站在漫译里的版式可能和 Safari 里不一样
 
 ## 使用方法
 
