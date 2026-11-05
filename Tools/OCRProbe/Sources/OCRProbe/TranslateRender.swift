@@ -2,30 +2,33 @@ import CoreGraphics
 import CoreText
 import MangaCore
 
-/// 模拟 App 里的显示效果：对白、旁白用白底盖住原文，再把译文排进同一位置；
-/// 拟声词、标题这类大字在原文左上角贴半透明小标签，不盖住原文。
+/// 模拟 App 里的显示效果：文字周围是纯色（白气泡、黑底说明框）时用同样的颜色盖住原文，再把译文排进同一位置；
+/// 周围是画面时，拟声词、标题在原文左上角贴半透明小标签，对白、旁白用白底盖住。
 /// 字号上限优先用块自己的字号估计，没有时用整页的 characterSize
 func renderTranslated(image: CGImage, blocks: [TranslatedBlock], characterSize: CGFloat) throws -> CGImage {
     let pageSize = CGSize(width: image.width, height: image.height)
     let context = try makeContext(width: image.width, height: image.height)
     context.draw(image, in: CGRect(origin: .zero, size: pageSize))
 
-    let padding = max(4, characterSize * 0.25)
+    let padding = TextCover.padding(characterSize: characterSize)
+    let grid = PixelGrid(image: image)
     for block in blocks where block.shouldOverlay {
-        if block.showsAsLabel {
+        let cover = grid?.uniformColor(around: block.box.rect, ring: padding)
+        if block.showsAsLabel(cover: cover) {
             drawLabel(block, characterSize: characterSize, pageSize: pageSize, context: context)
             continue
         }
         let rect = block.box.rect.insetBy(dx: -padding, dy: -padding)
         let shape = flipped(rect, pageHeight: pageSize.height)
         let corner = min(padding, shape.width / 2, shape.height / 2)
-        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.setFillColor(cover.map(cgColor) ?? CGColor(gray: 1, alpha: 1))
         context.addPath(CGPath(roundedRect: shape, cornerWidth: corner, cornerHeight: corner, transform: nil))
         context.fillPath()
         drawFittedText(
             block.translation, in: rect.insetBy(dx: padding / 2, dy: padding / 2),
             vertical: block.direction == .vertical,
             maxSize: max(block.characterSize.map { CGFloat($0) } ?? characterSize, 12),
+            color: CGColor(gray: cover.map { $0.isLight ? 0.07 : 1 } ?? 0, alpha: 1),
             context: context, pageHeight: pageSize.height)
     }
 
@@ -34,11 +37,16 @@ func renderTranslated(image: CGImage, blocks: [TranslatedBlock], characterSize: 
 }
 
 /// 在 rect 内用尽量大的字号排下全部文字（不超过原文字号），横排时上下居中
+private func cgColor(_ cover: CoverColor) -> CGColor {
+    CGColor(red: CGFloat(cover.red) / 255, green: CGFloat(cover.green) / 255, blue: CGFloat(cover.blue) / 255, alpha: 1)
+}
+
 private func drawFittedText(
-    _ text: String, in rect: CGRect, vertical: Bool, maxSize: CGFloat, context: CGContext, pageHeight: CGFloat
+    _ text: String, in rect: CGRect, vertical: Bool, maxSize: CGFloat, color: CGColor, context: CGContext,
+    pageHeight: CGFloat
 ) {
     let frameAttributes = vertical ? verticalFrameAttributes() : nil
-    let black = CGColor(gray: 0, alpha: 1)
+    let black = color
     func framesetter(size: CGFloat) -> (CTFramesetter, Int) {
         let string = attributedText(
             text, fontName: "PingFangSC-Semibold", size: size, color: black, vertical: vertical, centered: true)

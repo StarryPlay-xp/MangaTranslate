@@ -12,7 +12,8 @@ enum TranslationCache {
     /// 提示词或贴字规则改了就加一，让旧缓存失效。
     /// 2：拟声词、标题也贴译文（旧缓存里没有这些块）
     /// 3：只有拟声词、标题用小标签，小标签字号跟对白一样（旧缓存里字大的对白也标成了小标签）
-    private static let version = 3
+    /// 4：纯色底上的字用同色盖住，拟声词、标题也是（旧缓存里没有底色，气泡里的拟声词是小标签）
+    private static let version = 4
 
     private static var directory: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]

@@ -60,11 +60,16 @@ enum OverlayScript {
             el.style.top = Math.max(0, Math.min(top, areaHeight - el.offsetHeight)) + 'px';
           };
 
-          // 点一下译文可以临时看原文，再点一下恢复
-          const textBox = (text, vertical, label) => {
+          // 点一下译文可以临时看原文，再点一下恢复。盖住原文时，周围是纯色就铺同样的底色（白气泡、黑底说明框），
+          // 看起来像直接换了字；没有底色信息时用白底黑字
+          const textBox = (item) => {
             const el = document.createElement('div');
-            el.textContent = text;
-            el.style.cssText = label ? labelStyle : textStyle + (vertical ? ';writing-mode:vertical-rl' : '');
+            el.textContent = item.text;
+            el.style.cssText = item.label ? labelStyle : textStyle + (item.vertical ? ';writing-mode:vertical-rl' : '');
+            if (!item.label && item.background) {
+              el.style.background = item.background;
+              el.style.color = item.textColor || '#111';
+            }
             el.addEventListener('click', (event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -322,7 +327,7 @@ enum OverlayScript {
               entry.box.replaceChildren();
               entry.texts = [];
               for (const item of items) {
-                const el = textBox(item.text, item.vertical, item.label);
+                const el = textBox(item);
                 // 小标签的位置在 place() 里按像素算，要知道自己多宽才能不超出图片
                 if (!item.label) {
                   el.style.left = (item.x * 100) + '%';
@@ -370,7 +375,7 @@ enum OverlayScript {
               const pageHeight = document.documentElement.scrollHeight;
               const viewWidth = window.visualViewport ? window.visualViewport.width : window.innerWidth;
               for (const item of items) {
-                const el = textBox(item.text, item.vertical, item.label);
+                const el = textBox(item);
                 el.dataset.top = item.y;
                 el.dataset.height = item.height;
                 root.appendChild(el);
@@ -439,6 +444,9 @@ struct OverlayItem: Encodable {
     var fontSize: Double
     /// 拟声词、标题这类大字：半透明小标签，不盖住原文
     var label: Bool
+    /// 盖住原文时铺的底色和字色（周围是纯色时取那个颜色）；没有时用白底黑字
+    var background: String?
+    var textColor: String?
 
     /// 小标签的字号上限（÷ 图片宽度）：字号本身跟这一页的对白一样，这里只防止整页都是大字时标签太大
     static let labelFontRatio = 0.05
@@ -447,15 +455,17 @@ struct OverlayItem: Encodable {
 
     /// 把截图上的像素坐标换算到网页文档坐标；框向外扩一点，盖住原文的边缘
     static func items(
-        for blocks: [TranslatedBlock], imageSize: CGSize, characterSize: CGFloat, viewport: Viewport
+        for blocks: [TranslatedBlock], imageSize: CGSize, characterSize: CGFloat, covers: [Int: CoverColor],
+        viewport: Viewport
     ) -> [OverlayItem] {
         let scaleX = viewport.width / imageSize.width
         let scaleY = viewport.height / imageSize.height
-        let padding = max(4, characterSize * 0.25)
+        let padding = TextCover.padding(characterSize: characterSize)
         return blocks.filter(\.shouldOverlay).map { block in
             let rect = block.box.rect.insetBy(dx: -padding, dy: -padding)
             let fontSize = block.characterSize.map { CGFloat($0) } ?? characterSize
-            let label = block.showsAsLabel
+            let cover = covers[block.id]
+            let label = block.showsAsLabel(cover: cover)
             let size = label ? min(fontSize, characterSize, imageSize.width * labelFontRatio) : fontSize
             return OverlayItem(
                 x: viewport.left + rect.minX * scaleX,
@@ -465,7 +475,7 @@ struct OverlayItem: Encodable {
                 text: block.translation,
                 vertical: block.direction == .vertical,
                 fontSize: max(size * scaleX, label ? CGFloat(labelMinFont) : 10),
-                label: label)
+                label: label, background: label ? nil : cover?.hex, textColor: label ? nil : cover?.textHex)
         }
     }
 }

@@ -348,7 +348,8 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
             }
 
             let items = OverlayItem.items(
-                for: translated, imageSize: page.imageSize, characterSize: page.characterSize, viewport: viewport)
+                for: translated, imageSize: page.imageSize, characterSize: page.characterSize, covers: page.covers,
+                viewport: viewport)
             let json = String(decoding: try JSONEncoder().encode(items), as: UTF8.self)
             try await webView.runIsolatedScript(
                 "window.__mangaTranslate.clearRegion(top, bottom); window.__mangaTranslate.render(JSON.parse(json));",

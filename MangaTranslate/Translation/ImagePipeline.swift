@@ -13,6 +13,8 @@ nonisolated struct PreparedSegment: Sendable {
     /// 发给模型的编号图
     var markedJPEG: Data
     var characterSize: CGFloat
+    /// 文字块编号 → 周围的纯色底色；周围是画面的块没有
+    var covers: [Int: CoverColor] = [:]
 }
 
 /// 逐段处理一张图：识别完一段就可以先交给模型，不用等整张长图都识别完
@@ -40,11 +42,25 @@ enum ImagePipeline {
         guard !owned.isEmpty else { return nil }
         return PreparedSegment(
             rect: rect, blocks: owned, markedJPEG: try MarkedImage.encode(renderMarked(image: crop, blocks: owned)),
-            characterSize: analysis.characterSize)
+            characterSize: analysis.characterSize,
+            covers: coverColors(of: owned, in: crop, characterSize: analysis.characterSize))
     }
 }
 
 extension ImagePipeline {
+    /// 每个文字块周围是不是纯色（白气泡、黑底说明框）：是的话盖住时铺同样的颜色
+    nonisolated static func coverColors(of blocks: [TextBlock], in image: CGImage, characterSize: CGFloat)
+        -> [Int: CoverColor]
+    {
+        guard let grid = PixelGrid(image: image) else { return [:] }
+        let ring = TextCover.padding(characterSize: characterSize)
+        var covers: [Int: CoverColor] = [:]
+        for block in blocks {
+            covers[block.id] = grid.uniformColor(around: block.box.rect, ring: ring)
+        }
+        return covers
+    }
+
     /// 截图内容的指纹，用作缓存键：canvas 画的页面没有图片地址，同样的画面算出同样的值。
     /// 重新画到一块自己的位图里再算，裁剪出来的 CGImage 可能还连着整张截图的数据
     @concurrent
@@ -77,6 +93,9 @@ nonisolated struct ImageOverlayItem: Codable, Sendable {
     var fontScale: Double
     /// 拟声词、标题这类大字：贴一个不挡画面的半透明小标签，不盖住原文。旧缓存里没有这个字段
     var label: Bool?
+    /// 盖住原文时铺的底色和字色（周围是纯色时取那个颜色）；没有时用白底黑字
+    var background: String?
+    var textColor: String?
 
     static func items(for blocks: [TranslatedBlock], in segment: PreparedSegment, imageWidth: Int, imageHeight: Int)
         -> [ImageOverlayItem]
@@ -84,7 +103,7 @@ nonisolated struct ImageOverlayItem: Codable, Sendable {
         let width = Double(imageWidth)
         let height = Double(imageHeight)
         let bounds = CGRect(x: 0, y: 0, width: width, height: height)
-        let padding = max(4, segment.characterSize * 0.25)
+        let padding = TextCover.padding(characterSize: segment.characterSize)
         return blocks.filter(\.shouldOverlay).map { block in
             // 框向外扩一点，盖住原文的边缘；再从段内坐标换算回整张图
             let rect = block.box.rect
@@ -93,13 +112,14 @@ nonisolated struct ImageOverlayItem: Codable, Sendable {
                 .intersection(bounds)
             let fontSize = block.characterSize.map { CGFloat($0) } ?? segment.characterSize
             // 小标签和这一段的对白一样大（整段字号多半就是对白的字号），原文更小时跟着原文
-            let label = block.showsAsLabel
+            let cover = segment.covers[block.id]
+            let label = block.showsAsLabel(cover: cover)
             return ImageOverlayItem(
                 x: rect.minX / width, y: rect.minY / height,
                 width: rect.width / width, height: rect.height / height,
                 text: block.translation, vertical: block.direction == .vertical,
                 fontScale: (label ? min(fontSize, segment.characterSize) : fontSize) / width,
-                label: label)
+                label: label, background: label ? nil : cover?.hex, textColor: label ? nil : cover?.textHex)
         }
     }
 }

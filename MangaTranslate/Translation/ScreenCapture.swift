@@ -8,6 +8,8 @@ nonisolated struct CapturedPage: Sendable {
     var markedJPEG: Data
     var imageSize: CGSize
     var characterSize: CGFloat
+    /// 文字块编号 → 周围的纯色底色
+    var covers: [Int: CoverColor]
 }
 
 enum ScreenCapture {
@@ -19,6 +21,7 @@ enum ScreenCapture {
             blocks: blocks,
             markedJPEG: try MarkedImage.encode(renderMarked(image: image, blocks: blocks)),
             imageSize: CGSize(width: image.width, height: image.height),
-            characterSize: analysis.characterSize)
+            characterSize: analysis.characterSize,
+            covers: ImagePipeline.coverColors(of: blocks, in: image, characterSize: analysis.characterSize))
     }
 }
