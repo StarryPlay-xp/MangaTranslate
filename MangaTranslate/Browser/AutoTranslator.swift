@@ -148,9 +148,9 @@ final class AutoTranslator {
         return settings.activeService.maxConcurrentImageRequests
     }
 
-    /// 同时处理几张图（下载或截图、识别、等模型）：和请求名额一样多，至少 2 张，
-    /// 前一张在等模型时下一张已经在识别
-    private var maxConcurrentImages: Int { max(2, requestLimit) }
+    /// 同时处理几张图（下载或截图、识别、等模型）：和请求名额一样多。
+    /// 局域网服务一次只处理一张，免得提前翻的图先识别完、抢走屏幕上这张的请求名额
+    private var maxConcurrentImages: Int { requestLimit }
 
     init(webView: WKWebView, memoryBank: MemoryBank) {
         self.webView = webView

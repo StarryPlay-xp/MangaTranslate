@@ -118,7 +118,14 @@ enum OverlayScript {
           // canvas 编号 → 上次看到的位置和从什么时候起没再动过
           const canvasMoves = new Map();
 
-          // 找出屏幕上和下方 1.5 屏以内、已经加载好的大图，按离屏幕的远近报给 App；
+          // 左右两边的图和屏幕上的漫画页原图尺寸相差不到 10%，就当作同一话的相邻页
+          const samePageSize = (a, b) =>
+            Math.abs(a.naturalWidth - b.naturalWidth) <= b.naturalWidth * 0.1 &&
+            Math.abs(a.naturalHeight - b.naturalHeight) <= b.naturalHeight * 0.1;
+
+          // 找出屏幕上和下方 1.5 屏以内、已经加载好的大图，按离屏幕的远近报给 App。
+          // 左右翻页的阅读器把各页横着排开：屏幕左右两侧外面的图，只有和屏幕上的漫画页一样大、
+          // 离屏幕不到 1.5 屏宽（前后各约 2 页）的才提前翻，排在屏幕上的图之后；尺寸不同的（广告页、推荐位）翻到了再说。
           // canvas 只在完整停在屏幕上 0.15 秒后才报，还在动（翻页动画）就 0.1 秒后再看
           const scan = () => {
             scanTimer = null;
@@ -126,18 +133,30 @@ enum OverlayScript {
             const viewWidth = window.innerWidth;
             const viewHeight = window.innerHeight;
             const items = [];
+            const pages = [];
             for (const img of document.images) {
-              if (img.dataset.mtState) continue;
               if (!img.complete || img.naturalWidth < 300 || img.naturalHeight < 200) continue;
               const rect = img.getBoundingClientRect();
               if (rect.width < viewWidth * 0.5 || rect.height < 100) continue;
               // 又矮、原图又小的多半是封面；又矮、放在链接里的多半是推广横幅
               if (rect.height < 200 && (img.naturalWidth < 600 || img.closest('a[href]'))) continue;
               if (rect.bottom < 0) continue;
-              // 左右翻页的阅读器把各页横着排开，完全在屏幕左右两侧外面的（别的页、广告页）翻到了再说
-              if (rect.right <= 0 || rect.left >= viewWidth) continue;
-              const distance = Math.max(0, rect.top - viewHeight);
-              if (distance > viewHeight * 1.5) continue;
+              pages.push({ img, rect, onScreen: rect.right > 0 && rect.left < viewWidth });
+            }
+            // 已经翻好的也算，用来认出它左右两边的相邻页
+            const shown = pages.filter((page) => page.onScreen).map((page) => page.img);
+            for (const { img, rect, onScreen } of pages) {
+              if (img.dataset.mtState) continue;
+              let distance;
+              if (onScreen) {
+                distance = Math.max(0, rect.top - viewHeight);
+                if (distance > viewHeight * 1.5) continue;
+              } else {
+                if (rect.top >= viewHeight || rect.bottom <= 0) continue;
+                const gap = rect.left >= viewWidth ? rect.left - viewWidth : -rect.right;
+                if (gap >= viewWidth * 1.5 || !shown.some((other) => samePageSize(img, other))) continue;
+                distance = gap + 1;
+              }
               if (!img.dataset.mtId) img.dataset.mtId = String(++nextId);
               items.push({ id: img.dataset.mtId, src: img.currentSrc || img.src, distance });
             }
