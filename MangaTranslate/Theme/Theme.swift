@@ -29,15 +29,17 @@ extension Font {
 }
 
 extension Color {
-    init(light: UInt32, dark: UInt32) {
-        self.init(uiColor: UIColor { traits in
+    /// 深浅色自动切换的颜色。SwiftUI 可能在后台渲染线程上解析颜色，
+    /// 所以这个闭包不能绑在主线程上（项目默认主线程隔离，不标 @Sendable 会被加上主线程检查而崩溃）
+    nonisolated init(light: UInt32, dark: UInt32) {
+        self.init(uiColor: UIColor { @Sendable traits in
             UIColor(hex: traits.userInterfaceStyle == .dark ? dark : light)
         })
     }
 }
 
 extension UIColor {
-    convenience init(hex: UInt32) {
+    nonisolated convenience init(hex: UInt32) {
         self.init(
             red: CGFloat((hex >> 16) & 0xFF) / 255,
             green: CGFloat((hex >> 8) & 0xFF) / 255,
@@ -126,7 +128,11 @@ struct Halftone: View {
     var color: Color = Theme.tone
 
     var body: some View {
-        Canvas { context, size in
+        // 绘制闭包也可能在后台渲染线程执行：先把参数拷成局部常量，闭包标 @Sendable，不绑在主线程上
+        let spacing = spacing
+        let maxDot = maxDot
+        let color = color
+        Canvas { @Sendable context, size in
             guard size.width > 0, size.height > 0 else { return }
             let rowStep = spacing * 0.866
             var row = 0
