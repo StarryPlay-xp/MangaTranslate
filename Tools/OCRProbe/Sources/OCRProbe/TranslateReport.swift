@@ -23,7 +23,14 @@ private func renderTranslateHTML(_ run: TranslateRun) -> String {
         summary.append("<p class=\"warn\">试运行：没有联网，“译文”一栏显示的是识别原文，只用来检查发送内容和预览排版。</p>")
     } else {
         let mode = (run.sendImage ? "图片 + 识别文字" : "仅识别文字") + (run.thinking ? "，开启思考" : "") + "，回复写法 \(run.replyFormat)"
+            + (run.stream ? "，流式" : "")
         summary.append("<p>模型 \(escapeHTML(run.model))（\(mode)） · \(escapeHTML(run.endpoint)) · 共 \(run.pages.count) 页，成功 \(requested.count) 页，失败 \(failed.count) 页 · 成功页平均 \(averageMs) ms</p>")
+        if run.stream {
+            let tokens = requested.compactMap(\.firstTokenMs)
+            let blocks = requested.compactMap(\.firstBlockMs)
+            func average(_ values: [Int]) -> Int { values.isEmpty ? 0 : values.reduce(0, +) / values.count }
+            summary.append("<p>流式：成功页平均首字 \(average(tokens)) ms，第一块译文 \(average(blocks)) ms（\(blocks.count) 页取到了第一块）</p>")
+        }
         let cached = usage.cachedInputTokens.map { "（其中缓存命中 \($0)）" } ?? ""
         summary.append("<p>token：输入 \(usage.inputTokens)\(cached) · 输出 \(usage.outputTokens)</p>")
         if !costs.isEmpty {
@@ -83,6 +90,8 @@ private func renderTranslatedPage(_ page: TranslatedPage) -> String {
     }
 
     var meta = ["耗时 \(page.elapsedMs) ms", page.peak ? "高峰时段" : "闲时"]
+    if let first = page.firstTokenMs { meta.append("首字 \(first) ms") }
+    if let first = page.firstBlockMs { meta.append("第一块 \(first) ms") }
     if page.attempts > 1 { meta.append("重试后第 \(page.attempts) 次成功") }
     if let usage = page.usage { meta.append("输入 \(usage.inputTokens) / 输出 \(usage.outputTokens) token") }
     if let cost = page.costUSD { meta.append(String(format: "约 $%.5f", cost)) }

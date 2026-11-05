@@ -46,12 +46,22 @@ private final class ImageJob {
     var failure: Error?
     /// 段序号 → 这一段的译文
     private var segmentItems: [Int: [ImageOverlayItem]] = [:]
+    /// 段序号 → 这一段还在生成、已经收到的译文（流式翻译时先贴出来）
+    private var partialItems: [Int: [ImageOverlayItem]] = [:]
+    /// 已经等到所有段的结果：之后不再贴中途的译文，免得把"翻译中"角标又放回去
+    var completed = false
+    /// 已经约好一次中途贴字，还没执行
+    var partialRenderScheduled = false
 
     // 各环节耗时
     var fetch: Duration = .zero
     var recognition: Duration = .zero
     var gateWaits: [Duration] = []
     var requests: [Duration] = []
+    /// 每次请求从发出到收到第一个字（流式）
+    var firstTokens: [Duration] = []
+    /// 有几次是对冲的第二份请求先出字
+    var hedgedRequests = 0
     /// 从网页报上来到第一次贴出译文
     private(set) var firstShown: Duration?
 
@@ -60,12 +70,25 @@ private final class ImageJob {
         self.seen = seen
     }
 
-    /// 按段的顺序排好的全部译文
+    /// 按段的顺序排好的全部译文（只含翻完的段）
     var items: [ImageOverlayItem] { segmentItems.keys.sorted().flatMap { segmentItems[$0] ?? [] } }
+
+    /// 现在能贴出来的译文：翻完的段用最终结果，还在生成的段用已经收到的部分
+    var displayItems: [ImageOverlayItem] {
+        Set(segmentItems.keys).union(partialItems.keys).sorted().flatMap { segmentItems[$0] ?? partialItems[$0] ?? [] }
+    }
 
     func finish(_ index: Int, items: [ImageOverlayItem]) {
         segmentItems[index] = items
+        partialItems[index] = nil
         unfinished -= 1
+    }
+
+    /// 这一段还没翻完时才记下中途的译文
+    func setPartial(_ index: Int, items: [ImageOverlayItem]) -> Bool {
+        guard !completed, segmentItems[index] == nil else { return false }
+        partialItems[index] = items
+        return true
     }
 
     func skip() { unfinished -= 1 }
@@ -86,7 +109,9 @@ private final class ImageJob {
             parts.append("模型 \(requests.count) 次，平均 \(seconds(average))，最慢 \(seconds(longest))")
             parts.append("等名额最长 \(seconds(waited))")
         }
-        if segmentCount > 1, let firstShown { parts.append("首段贴出 \(seconds(firstShown))") }
+        if let fastest = firstTokens.min() { parts.append("首字最快 \(seconds(fastest))") }
+        if hedgedRequests > 0 { parts.append("\(hedgedRequests) 次靠对冲") }
+        if let firstShown { parts.append("第一处译文 \(seconds(firstShown))") }
         return "从发现到贴完 \(seconds(.now - seen))：" + parts.joined(separator: "，") + "；贴了 \(itemCount) 处"
     }
 }
@@ -144,6 +169,11 @@ final class AutoTranslator {
 
     /// 上次预先连接的时间，30 秒内不重复
     @ObservationIgnored private var lastWarmUp: ContinuousClock.Instant?
+
+    /// 第一个字过了这么久还没来，就再发一份同样的请求
+    private static let hedgeAfter: Duration = .seconds(4)
+    /// 收到新的块后等这么久再贴，连续到达的几块合成一次，免得网页一直重排
+    private static let partialRenderDelay: Duration = .milliseconds(80)
 
     /// 同时发出的模型请求数
     private var requestLimit: Int {
@@ -330,6 +360,7 @@ final class AutoTranslator {
                 })
             }
             for request in requests { await request.value }
+            job.completed = true
             guard generation == self.generation else { return }
             if let failure = job.failure { throw failure }
             let items = job.items
@@ -396,11 +427,17 @@ final class AutoTranslator {
                 blocks: segment.blocks, languageName: language.displayName,
                 readingOrder: language.readingOrder, memory: memoryBank.memory(for: host))
             let ledger = usage
+            // 边生成边贴出已经翻好的块；第一个字 4 秒还没来就再发一份（局域网服务不对冲，免得小模型负担加倍）
+            let streaming = StreamingOptions(
+                hedgeAfter: config.isLocalNetwork ? nil : Self.hedgeAfter,
+                onPartial: { [weak self] blocks in
+                    await self?.partialArrived(blocks, index: index, segment: segment, of: candidate, job: job, generation: generation)
+                })
             let result: PageTranslation
             do {
                 result = try await translator.translate(
                     blocks: segment.blocks, prompt: prompt, markedImage: segment.markedJPEG, using: client,
-                    onUsage: { await ledger?.record($0, config: config) })
+                    onUsage: { await ledger?.record($0, config: config) }, streaming: streaming)
             } catch {
                 requestGate.release()
                 if job.failure == nil { job.failure = error }
@@ -410,7 +447,10 @@ final class AutoTranslator {
             let took = ContinuousClock.now - requestStarted
             job.gateWaits.append(waited)
             job.requests.append(took)
-            let line = "第 \(index + 1)/\(job.segmentCount) 段：等名额 \(seconds(waited))，模型 \(seconds(took))"
+            if let firstToken = result.firstToken { job.firstTokens.append(firstToken) }
+            if result.hedged { job.hedgedRequests += 1 }
+            let firstToken = result.firstToken.map { "，首字 \(seconds($0))" + (result.hedged ? "（对冲的第二份先出字）" : "") } ?? ""
+            let line = "第 \(index + 1)/\(job.segmentCount) 段：等名额 \(seconds(waited))，模型 \(seconds(took))\(firstToken)"
                 + "（第 \(result.attempts) 次成功，输入 \(result.usage.inputTokens)、输出 \(result.usage.outputTokens) token）"
             timingLogger.info("图片 \(candidate.id, privacy: .public) \(line, privacy: .public)")
             memoryBank.record(result, host: host)
@@ -423,7 +463,25 @@ final class AutoTranslator {
         job.finish(index, items: items)
         // 最后一段由 process 统一贴上并写缓存
         if job.unfinished > 0, !items.isEmpty {
-            await renderPartial(candidate.id, items: job.items, generation: generation)
+            await renderPartial(candidate.id, items: job.displayItems, generation: generation)
+            job.noteShown()
+        }
+    }
+
+    /// 流式翻译收到了新的完整块：记下来，稍等一下再贴，连续到达的几块合成一次
+    private func partialArrived(
+        _ blocks: [TranslatedBlock], index: Int, segment: PreparedSegment, of candidate: ImageCandidate, job: ImageJob,
+        generation: Int
+    ) {
+        guard generation == self.generation, job.failure == nil else { return }
+        let items = ImageOverlayItem.items(for: blocks, in: segment, imageWidth: job.width, imageHeight: job.height)
+        guard !items.isEmpty, job.setPartial(index, items: items), !job.partialRenderScheduled else { return }
+        job.partialRenderScheduled = true
+        Task {
+            try? await Task.sleep(for: Self.partialRenderDelay)
+            job.partialRenderScheduled = false
+            guard !job.completed else { return }
+            await renderPartial(candidate.id, items: job.displayItems, generation: generation)
             job.noteShown()
         }
     }

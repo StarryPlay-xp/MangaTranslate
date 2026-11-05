@@ -13,14 +13,44 @@ public struct OpenAICompatibleClient: LLMClient {
     }
 
     public func makeURLRequest(_ prompt: LLMPrompt) throws -> URLRequest {
+        try makeURLRequest(prompt, streaming: false)
+    }
+
+    /// 打开 stream，并要求在最后一条里附上用量（include_usage），用来记账
+    public func makeStreamingURLRequest(_ prompt: LLMPrompt) throws -> URLRequest {
+        try makeURLRequest(prompt, streaming: true)
+    }
+
+    private func makeURLRequest(_ prompt: LLMPrompt, streaming: Bool) throws -> URLRequest {
         var request = URLRequest(url: endpoint, timeoutInterval: config.timeoutSeconds)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if !apiKey.isEmpty {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
-        request.httpBody = try encoder.encode(body(for: prompt))
+        var body = body(for: prompt)
+        if streaming {
+            body.stream = true
+            body.streamOptions = .init(includeUsage: true)
+        }
+        request.httpBody = try encoder.encode(body)
         return request
+    }
+
+    /// 每条是 {"choices": [{"delta": {"content": "…"}}]}；带 include_usage 时最后一条 choices 为空、带 usage
+    public func parseStreamChunk(_ data: Data) throws -> [LLMStreamEvent] {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        guard let chunk = try? decoder.decode(StreamChunk.self, from: data) else { return [] }
+        var events: [LLMStreamEvent] = []
+        let text = chunk.choices?.compactMap { $0.delta?.content?.text }.joined() ?? ""
+        if !text.isEmpty { events.append(.text(text)) }
+        if let usage = chunk.usage {
+            events.append(.usage(
+                input: usage.promptTokens, output: usage.completionTokens,
+                cached: usage.promptCacheHitTokens ?? usage.promptTokensDetails?.cachedTokens))
+        }
+        return events
     }
 
     func body(for prompt: LLMPrompt) -> Body {
@@ -107,14 +137,26 @@ public struct OpenAICompatibleClient: LLMClient {
 
         struct ResponseFormat: Encodable { var type: String }
         struct Thinking: Encodable { var type: String }
+        struct StreamOptions: Encodable { var includeUsage: Bool }
 
         var model: String
         var messages: [Message]
         var maxTokens: Int?
         var maxCompletionTokens: Int?
         var stream = false
+        var streamOptions: StreamOptions?
         var responseFormat: ResponseFormat?
         var thinking: Thinking?
+    }
+
+    private struct StreamChunk: Decodable {
+        struct Choice: Decodable {
+            struct Delta: Decodable { var content: FlexibleText? }
+            var delta: Delta?
+        }
+
+        var choices: [Choice]?
+        var usage: Response.Usage?
     }
 
     private struct Response: Decodable {

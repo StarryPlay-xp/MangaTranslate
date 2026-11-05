@@ -18,6 +18,14 @@ public struct AnthropicClient: LLMClient {
     }
 
     public func makeURLRequest(_ prompt: LLMPrompt) throws -> URLRequest {
+        try makeURLRequest(prompt, streaming: false)
+    }
+
+    public func makeStreamingURLRequest(_ prompt: LLMPrompt) throws -> URLRequest {
+        try makeURLRequest(prompt, streaming: true)
+    }
+
+    private func makeURLRequest(_ prompt: LLMPrompt, streaming: Bool) throws -> URLRequest {
         var request = URLRequest(url: endpoint, timeoutInterval: config.timeoutSeconds)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -29,8 +37,41 @@ public struct AnthropicClient: LLMClient {
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        request.httpBody = try encoder.encode(body(for: prompt))
+        var body = body(for: prompt)
+        if streaming { body.stream = true }
+        request.httpBody = try encoder.encode(body)
         return request
+    }
+
+    /// 事件按 type 区分：message_start 带输入用量，content_block_delta 带文字，message_delta 带输出用量和结束原因
+    public func parseStreamChunk(_ data: Data) throws -> [LLMStreamEvent] {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        guard let event = try? decoder.decode(StreamEvent.self, from: data) else { return [] }
+        switch event.type {
+        case "message_start":
+            guard let usage = event.message?.usage else { return [] }
+            let cacheRead = usage.cacheReadInputTokens ?? 0
+            let cacheWrite = usage.cacheCreationInputTokens ?? 0
+            return [.usage(
+                input: (usage.inputTokens ?? 0) + cacheRead + cacheWrite, output: usage.outputTokens,
+                cached: usage.cacheReadInputTokens)]
+        case "content_block_delta":
+            // 思考过程（thinking_delta）不要
+            guard event.delta?.type == "text_delta", let text = event.delta?.text, !text.isEmpty else { return [] }
+            return [.text(text)]
+        case "message_delta":
+            if event.delta?.stopReason == "refusal" {
+                throw LLMServiceError(kind: .refused, message: "模型拒绝处理这一页")
+            }
+            return event.usage?.outputTokens.map { [.usage(input: nil, output: $0, cached: nil)] } ?? []
+        case "error":
+            // 过载（overloaded_error）按 529 处理，可以重试
+            let overloaded = event.error?.type == "overloaded_error"
+            throw LLMServiceError(status: overloaded ? 529 : 500, message: event.error?.message ?? "")
+        default:
+            return []
+        }
     }
 
     func body(for prompt: LLMPrompt) -> Body {
@@ -93,6 +134,26 @@ public struct AnthropicClient: LLMClient {
         var maxTokens: Int
         var system: String
         var messages: [Message]
+        var stream: Bool?
+    }
+
+    private struct StreamEvent: Decodable {
+        struct Message: Decodable { var usage: Response.Usage? }
+        struct Delta: Decodable {
+            var type: String?
+            var text: String?
+            var stopReason: String?
+        }
+        struct ErrorInfo: Decodable {
+            var type: String?
+            var message: String?
+        }
+
+        var type: String
+        var message: Message?
+        var delta: Delta?
+        var usage: Response.Usage?
+        var error: ErrorInfo?
     }
 
     private struct Response: Decodable {

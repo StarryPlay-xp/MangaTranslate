@@ -71,6 +71,12 @@ public protocol LLMClient: Sendable {
     func parseReply(_ data: Data) throws -> LLMReply
     /// 发送请求；默认实现用 URLSession
     func complete(_ prompt: LLMPrompt) async throws -> LLMReply
+    /// 打开流式输出的请求；默认和 makeURLRequest 一样（不流式）
+    func makeStreamingURLRequest(_ prompt: LLMPrompt) throws -> URLRequest
+    /// 解析流式回复里一条 data 的内容；默认什么都不取
+    func parseStreamChunk(_ data: Data) throws -> [LLMStreamEvent]
+    /// 边生成边返回文字片段，最后给出用量；默认实现读取 SSE，见 LLMStreaming.swift
+    func stream(_ prompt: LLMPrompt) -> AsyncThrowingStream<LLMStreamEvent, Error>
 }
 
 extension LLMClient {

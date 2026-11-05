@@ -78,6 +78,10 @@ public struct PageTranslation: Sendable {
     /// 包含重试在内的用量
     public var usage: LLMUsage
     public var attempts: Int
+    /// 流式翻译时，成功那次从发出请求到收到第一个字的时间；普通请求为 nil
+    public var firstToken: Duration? = nil
+    /// 成功那次是对冲的第二份请求先出字
+    public var hedged = false
 }
 
 /// 跨页记忆：术语表和最近的译文，让同一部作品前后译名和语气一致
@@ -212,17 +216,26 @@ public struct PageTranslator: Sendable {
     }
 
     /// 发送请求并解析 json；网络错误、限流、空白或不合法的返回最多重试 3 次。
-    /// onUsage 在每次收到带用量的回复后调用，包括之后解析失败、要重试的那几次，用来记账
+    /// onUsage 在每次收到带用量的回复后调用，包括之后解析失败、要重试的那几次，用来记账。
+    /// 传了 streaming 就边生成边返回（见 PageTranslator+Streaming.swift）；服务拒绝流式参数时自动改用普通请求
     public func translate(
         blocks: [TextBlock], prompt: String, markedImage: Data, using client: any LLMClient,
-        onUsage: (@Sendable (LLMUsage) async -> Void)? = nil
+        onUsage: (@Sendable (LLMUsage) async -> Void)? = nil, streaming: StreamingOptions? = nil
     ) async throws -> PageTranslation {
         let request = makePrompt(prompt: prompt, markedImage: markedImage)
         var usage = LLMUsage.zero
         var lastError: Error = MangaCoreError("未知错误")
         for attempt in 1...3 {
+            let streams = streaming != nil && !StreamingSupport.isUnsupported(client.config)
             do {
-                let reply = try await client.complete(request)
+                let reply: LLMReply
+                var streamed: StreamedReply?
+                if streams, let streaming {
+                    streamed = try await streamedReply(request, blocks: blocks, using: client, options: streaming)
+                    reply = streamed!.reply
+                } else {
+                    reply = try await client.complete(request)
+                }
                 if let replyUsage = reply.usage {
                     usage = usage.adding(replyUsage)
                     await onUsage?(replyUsage)
@@ -230,7 +243,11 @@ public struct PageTranslator: Sendable {
                 let output = try TranslationOutput.parse(reply.content)
                 return PageTranslation(
                     blocks: Self.merge(blocks, with: output), newTerms: output.newTerms ?? [],
-                    usage: usage, attempts: attempt)
+                    usage: usage, attempts: attempt, firstToken: streamed?.firstToken, hedged: streamed?.hedged ?? false)
+            } catch let error as LLMServiceError where error.status == 400 && streams {
+                // 可能是服务不认 stream 参数：记下来，马上改用普通请求再试（真是别的原因的话，普通请求会再报一次）
+                StreamingSupport.markUnsupported(client.config)
+                lastError = error
             } catch let error as LLMServiceError where !error.isRetryable {
                 throw error
             } catch {
@@ -241,7 +258,7 @@ public struct PageTranslator: Sendable {
         throw lastError
     }
 
-    private static func merge(_ blocks: [TextBlock], with output: TranslationOutput) -> [TranslatedBlock] {
+    static func merge(_ blocks: [TextBlock], with output: TranslationOutput) -> [TranslatedBlock] {
         let items = Dictionary(output.blocks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return blocks.map { block in
             var translated = TranslatedBlock(untranslated: block)

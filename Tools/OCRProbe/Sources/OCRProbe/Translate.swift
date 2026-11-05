@@ -14,8 +14,10 @@ struct TranslateOptions {
     var dryRun = false
     /// 模型回复的写法；写多个时每页轮流用各种写法各翻一次，生成对比报告
     var replyFormats: [ReplyFormat] = [.full]
+    /// 流式请求：记录首字时间和第一块译文出来的时间（和 App 的自动翻译一样，但不对冲）
+    var stream = false
 
-    static let usage = "用法：ocrprobe translate <样本目录> <识别结果目录> <输出目录> [--limit 3] [--text-only] [--thinking] [--dry-run] [--reply-format full|nosource|compact|compact-source，逗号分隔可写多个] \(ServiceOptions.usage)"
+    static let usage = "用法：ocrprobe translate <样本目录> <识别结果目录> <输出目录> [--limit 3] [--text-only] [--thinking] [--dry-run] [--reply-format full|nosource|compact|compact-source，逗号分隔可写多个] [--stream] \(ServiceOptions.usage)"
 
     init(parsing args: [String]) throws {
         var positional: [String] = []
@@ -30,6 +32,7 @@ struct TranslateOptions {
             case "--text-only": sendImage = false
             case "--thinking": service.config.enableThinking = true
             case "--dry-run": dryRun = true
+            case "--stream": stream = true
             case "--reply-format":
                 let names = (iterator.next() ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
                 let formats = names.compactMap(ReplyFormat.init(rawValue:))
@@ -61,11 +64,15 @@ struct TranslatedPage: Codable, Sendable {
     var markedImage: String
     var previewImage: String?
     var error: String?
+    /// 流式请求时：从发出到收到第一个字、到取出第一块完整译文
+    var firstTokenMs: Int?
+    var firstBlockMs: Int?
     /// 终端里这一页后面显示的说明，不写进报告
     var note: String?
 
     enum CodingKeys: String, CodingKey {
         case file, elapsedMs, attempts, peak, usage, costUSD, blocks, userPrompt, markedImage, previewImage, error
+        case firstTokenMs, firstBlockMs
     }
 }
 
@@ -78,6 +85,7 @@ struct TranslateRun: Codable, Sendable {
     var sendImage: Bool
     var thinking: Bool
     var dryRun: Bool
+    var stream = false
     var pages: [TranslatedPage]
     var glossary: [GlossaryTerm]
 }
@@ -141,7 +149,7 @@ func runTranslate(_ options: TranslateOptions) async throws {
         let run = TranslateRun(
             format: config.format.rawValue, replyFormat: format.rawValue, endpoint: endpoint.absoluteString,
             model: config.model, sendImage: options.sendImage, thinking: config.enableThinking && config.preset != nil,
-            dryRun: options.dryRun, pages: results[format] ?? [],
+            dryRun: options.dryRun, stream: options.stream, pages: results[format] ?? [],
             glossary: (memories[format] ?? [:]).keys.sorted().flatMap { memories[format]![$0]!.glossary })
         try writeTranslateReport(run, to: comparing ? options.output.appendingPathComponent(format.rawValue) : options.output)
         runs.append(run)
@@ -185,9 +193,14 @@ private struct PageContext {
         } else {
             let clock = ContinuousClock()
             let start = clock.now
+            let firstBlock = FirstMoment()
+            let streaming = options.stream
+                ? StreamingOptions(onPartial: { _ in await firstBlock.mark(clock.now - start) }) : nil
             do {
                 let done = try await translator.translate(
-                    blocks: page.blocks, prompt: prompt, markedImage: markedData, using: client)
+                    blocks: page.blocks, prompt: prompt, markedImage: markedData, using: client, streaming: streaming)
+                result.firstTokenMs = done.firstToken.map(milliseconds)
+                result.firstBlockMs = await firstBlock.value.map(milliseconds)
                 result.attempts = done.attempts
                 result.usage = done.usage
                 result.blocks = done.blocks
@@ -202,7 +215,8 @@ private struct PageContext {
             if let pricing, let usage = result.usage {
                 result.costUSD = pricing.cost(of: usage, peak: result.peak)
             }
-            result.note = result.error.map { "失败：\($0)" } ?? "\(result.elapsedMs) ms"
+            let firstToken = result.firstTokenMs.map { "（首字 \($0) ms）" } ?? ""
+            result.note = result.error.map { "失败：\($0)" } ?? "\(result.elapsedMs) ms\(firstToken)"
         }
 
         if result.blocks.contains(where: \.shouldOverlay) {
@@ -213,6 +227,16 @@ private struct PageContext {
         }
         return (result, translation)
     }
+}
+
+/// 流式请求里第一次发生某件事的时间
+private actor FirstMoment {
+    private(set) var value: Duration?
+    func mark(_ duration: Duration) { if value == nil { value = duration } }
+}
+
+private func milliseconds(_ duration: Duration) -> Int {
+    Int((duration / .milliseconds(1)).rounded())
 }
 
 /// 请求示例按缩进、键名排序保存，方便核对
