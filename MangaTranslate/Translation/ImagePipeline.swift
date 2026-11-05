@@ -17,9 +17,6 @@ nonisolated struct PreparedSegment: Sendable {
 
 /// 逐段处理一张图：识别完一段就可以先交给模型，不用等整张长图都识别完
 enum ImagePipeline {
-    /// 编号图最多 200 万像素：DeepSeek 等模型本来就会缩到约 1300×1300，再大只是浪费流量
-    nonisolated static let maxMarkedPixels = 2_000_000
-
     /// 在后台解码下载到的图片
     @concurrent
     nonisolated static func decode(_ data: Data) async throws -> CGImage {
@@ -41,9 +38,8 @@ enum ImagePipeline {
         let (analysis, blocks) = try await detectTextBlocks(in: crop, language: language)
         let owned = Segmenting.ownedBlocks(blocks, segmentIndex: index, in: rects)
         guard !owned.isEmpty else { return nil }
-        let marked = try scaledToFit(renderMarked(image: crop, blocks: owned), maxPixelCount: maxMarkedPixels)
         return PreparedSegment(
-            rect: rect, blocks: owned, markedJPEG: try encodeImage(marked, format: .jpeg),
+            rect: rect, blocks: owned, markedJPEG: try MarkedImage.encode(renderMarked(image: crop, blocks: owned)),
             characterSize: analysis.characterSize)
     }
 }

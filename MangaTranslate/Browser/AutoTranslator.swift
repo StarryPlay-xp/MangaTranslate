@@ -142,6 +142,9 @@ final class AutoTranslator {
     @ObservationIgnored private let timingLogger = Logger(
         subsystem: "io.github.starryplay-xp.MangaTranslate", category: "timing")
 
+    /// 上次预先连接的时间，30 秒内不重复
+    @ObservationIgnored private var lastWarmUp: ContinuousClock.Instant?
+
     /// 同时发出的模型请求数
     private var requestLimit: Int {
         guard let settings, !settings.dryRun else { return 2 }
@@ -159,7 +162,9 @@ final class AutoTranslator {
 
     func setEnabled(_ enabled: Bool) {
         self.enabled = enabled
-        if !enabled {
+        if enabled {
+            warmUpConnection()
+        } else {
             queue.removeAll()
             firstSeen.removeAll()
         }
@@ -211,6 +216,17 @@ final class AutoTranslator {
             Task { await process(next, seen: seen, generation: generation) }
         }
         updateCount()
+    }
+
+    /// 先和模型服务建立连接、完成加密握手，第一张图发请求时直接复用这条连接。
+    /// 只发一个不带 Key、不带内容的 HEAD 请求，返回什么都不管
+    private func warmUpConnection() {
+        guard let settings, !settings.dryRun, let url = try? settings.activeService.config.endpoint() else { return }
+        if let lastWarmUp, ContinuousClock.now - lastWarmUp < .seconds(30) { return }
+        lastWarmUp = .now
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.httpMethod = "HEAD"
+        Task.detached { _ = try? await URLSession.shared.data(for: request) }
     }
 
     private func updateCount() {

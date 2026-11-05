@@ -26,15 +26,29 @@ public func loadImage(at url: URL) throws -> CGImage {
     return image
 }
 
-public func encodeImage(_ image: CGImage, format: ImageFormat) throws -> Data {
+/// quality 只对 JPEG 有效
+public func encodeImage(_ image: CGImage, format: ImageFormat, quality: Double = 0.85) throws -> Data {
     let data = NSMutableData()
     guard let destination = CGImageDestinationCreateWithData(data, format.typeIdentifier, 1, nil) else {
         throw MangaCoreError("无法编码图片")
     }
-    let options = [kCGImageDestinationLossyCompressionQuality: 0.85] as CFDictionary
+    let options = [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary
     CGImageDestinationAddImage(destination, image, options)
     guard CGImageDestinationFinalize(destination) else { throw MangaCoreError("无法编码图片") }
     return data as Data
+}
+
+/// 发给模型的编号图。App 的自动翻译、"只翻译这一屏"和 OCRProbe 都用这一套设置
+public enum MarkedImage {
+    /// 最多约 169 万像素：DeepSeek 等模型本来就会把图缩到约 1300×1300，再大只是多传流量
+    public static let maxPixels = 1_690_000
+    /// 比 0.85 小约 15%，小字和注音看不出区别
+    public static let jpegQuality = 0.8
+
+    /// 缩到不超过 maxPixels 再编码成 JPEG
+    public static func encode(_ image: CGImage) throws -> Data {
+        try encodeImage(scaledToFit(image, maxPixelCount: maxPixels), format: .jpeg, quality: jpegQuality)
+    }
 }
 
 public func makeContext(width: Int, height: Int) throws -> CGContext {

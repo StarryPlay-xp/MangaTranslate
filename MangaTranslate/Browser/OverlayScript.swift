@@ -124,9 +124,9 @@ enum OverlayScript {
             Math.abs(a.naturalWidth - b.naturalWidth) <= b.naturalWidth * 0.1 &&
             Math.abs(a.naturalHeight - b.naturalHeight) <= b.naturalHeight * 0.1;
 
-          // 找出屏幕上和下方 1.5 屏以内、已经加载好的大图，按离屏幕的远近报给 App。
+          // 找出屏幕上和下方 3 屏以内、已经加载好的大图，按离屏幕的远近报给 App。
           // 左右翻页的阅读器把各页横着排开：屏幕左右两侧外面的图，只有和屏幕上的漫画页一样大、
-          // 离屏幕不到 1.5 屏宽（前后各约 2 页）的才提前翻，排在屏幕上的图之后；尺寸不同的（广告页、推荐位）翻到了再说。
+          // 离屏幕不到 2.5 屏宽（前后各约 3 页）的才提前翻，排在屏幕上的图之后；尺寸不同的（广告页、推荐位）翻到了再说。
           // canvas 只在完整停在屏幕上 0.15 秒后才报，还在动（翻页动画）就 0.1 秒后再看
           const scan = () => {
             scanTimer = null;
@@ -151,11 +151,11 @@ enum OverlayScript {
               let distance;
               if (onScreen) {
                 distance = Math.max(0, rect.top - viewHeight);
-                if (distance > viewHeight * 1.5) continue;
+                if (distance > viewHeight * 3) continue;
               } else {
                 if (rect.top >= viewHeight || rect.bottom <= 0) continue;
                 const gap = rect.left >= viewWidth ? rect.left - viewWidth : -rect.right;
-                if (gap >= viewWidth * 1.5 || !shown.some((other) => samePageSize(img, other))) continue;
+                if (gap >= viewWidth * 2.5 || !shown.some((other) => samePageSize(img, other))) continue;
                 distance = gap + 1;
               }
               if (!img.dataset.mtId) img.dataset.mtId = String(++nextId);

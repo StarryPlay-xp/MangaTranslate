@@ -15,10 +15,9 @@ enum ScreenCapture {
     @concurrent
     nonisolated static func prepare(image: sending CGImage, language: SourceLanguage) async throws -> CapturedPage {
         let (analysis, blocks) = try await detectTextBlocks(in: image, language: language)
-        let marked = try renderMarked(image: image, blocks: blocks)
         return CapturedPage(
             blocks: blocks,
-            markedJPEG: try encodeImage(marked, format: .jpeg),
+            markedJPEG: try MarkedImage.encode(renderMarked(image: image, blocks: blocks)),
             imageSize: CGSize(width: image.width, height: image.height),
             characterSize: analysis.characterSize)
     }

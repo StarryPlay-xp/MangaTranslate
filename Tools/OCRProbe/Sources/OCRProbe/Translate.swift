@@ -96,7 +96,7 @@ func runTranslate(_ options: TranslateOptions) async throws {
         let baseName = page.file.replacingOccurrences(of: "/", with: "__")
 
         let marked = try renderMarked(image: image, blocks: page.blocks)
-        let markedData = try encodeImage(marked, format: .jpeg)
+        let markedData = try MarkedImage.encode(marked)
         let markedPath = "marked/\(baseName).jpg"
         try writeFile(markedData, to: options.output.appendingPathComponent(markedPath))
 
