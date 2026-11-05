@@ -96,8 +96,11 @@ public struct TranslationMemory: Codable, Sendable {
     }
 }
 
-/// 模型回复的写法。App 现在用 full；其余几种更短、生成更快，正在用 OCRProbe 对比速度和质量。
-/// 第一轮对比（42 页）：不抄原文的 nosource、compact 快 18%～26%，但人名、短句错得明显更多，不采用
+/// 模型回复的写法。App 用 full；其余几种更短、生成更快，留给 OCRProbe 换模型时对比。
+/// 2026-11 用 deepseek-flash 在 42 页样本上对比过两轮：
+/// - 不抄原文的 nosource、compact 快 18%～26%，但人名、短句错得明显更多，错名还会写进术语表
+/// - 照样抄原文的 compact-source 输出少 36%、只快约 11%（模型耗时大头是上传和读图），数字和短句错误仍比 full 多
+/// 所以都没有采用
 public enum ReplyFormat: String, CaseIterable, Sendable {
     /// 每块写出编号、核对后的原文、译文和类型
     case full
