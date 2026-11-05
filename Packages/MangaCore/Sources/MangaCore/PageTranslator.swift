@@ -8,6 +8,20 @@ public struct GlossaryTerm: Codable, Sendable, Equatable {
         self.source = source
         self.translation = translation
     }
+
+    enum CodingKeys: String, CodingKey { case source, translation }
+
+    /// 平时是 {"source", "translation"}；精简写法（ReplyFormat.compact）里是 ["原文", "译名"]
+    public init(from decoder: Decoder) throws {
+        if let container = try? decoder.container(keyedBy: CodingKeys.self) {
+            source = try container.decode(String.self, forKey: .source)
+            translation = try container.decode(String.self, forKey: .translation)
+        } else {
+            var array = try decoder.unkeyedContainer()
+            source = try array.decode(String.self)
+            translation = try array.decode(String.self)
+        }
+    }
 }
 
 public struct TranslatedBlock: Codable, Sendable {
@@ -82,17 +96,31 @@ public struct TranslationMemory: Codable, Sendable {
     }
 }
 
+/// 模型回复的写法。App 现在用 full；另外两种更短、生成更快，正在用 OCRProbe 对比速度和质量
+public enum ReplyFormat: String, CaseIterable, Sendable {
+    /// 每块写出编号、核对后的原文、译文和类型
+    case full
+    /// 和 full 一样，但不再抄写原文
+    case noSource = "nosource"
+    /// 每块写成 [编号, 类型, 译文] 数组，也不抄写原文
+    case compact
+}
+
 /// 组织提示词、调用模型并解析一页的翻译结果
 public struct PageTranslator: Sendable {
     /// 把带编号框的图片发给模型；模型不支持看图时应传 false
     public var sendImage: Bool
+    public var replyFormat: ReplyFormat
 
-    public init(sendImage: Bool = true) {
+    public init(sendImage: Bool = true, replyFormat: ReplyFormat = .full) {
         self.sendImage = sendImage
+        self.replyFormat = replyFormat
     }
 
     // 系统提示词保持不变：DeepSeek 等服务会自动缓存相同的开头部分，重复请求更便宜
-    public static let systemPrompt = """
+    public static let systemPrompt = systemPrompt(for: .full)
+
+    private static let instructions = """
         你是经验丰富的漫画汉化译者，负责把日漫、韩漫里的文字翻译成自然、口语化的简体中文。
 
         每次你会收到一页漫画里各个文字块的编号和本地 OCR 结果（可能有错字，也可能为空）。通常还会附上这页的图片，图上用红框和编号标出了这些文字块。
@@ -104,12 +132,41 @@ public struct PageTranslator: Sendable {
         4. 网站水印、广告、网址、界面按钮、页码等不属于剧情的文字，kind 填 "noise"，translation 留空。
         5. 拟声词 kind 填 "sfx"，translation 给出简短的中文拟声词。气泡里的台词哪怕字很大、是在喊叫，也是 dialogue。
         6. 作品标题、章节标题、宣传语、作者名等排成大字或艺术字的文字，kind 填 "title"，translation 给出简短的中文；和中文写法完全一样的（比如汉字人名），translation 留空。
-        7. 框里其实没有文字时，kind 填 "noise"，source 和 translation 都留空。
-
-        只输出 json，不要输出任何解释。每个编号都要出现且只出现一次，id 与编号一致。格式如下：
-        {"blocks": [{"id": 1, "source": "核对后的原文", "translation": "中文译文", "kind": "dialogue"}], "new_terms": [{"source": "原文专有名词", "translation": "中文译名"}]}
-        kind 只能是 dialogue（对白）、narration（旁白）、sfx（拟声词）、title（标题、宣传语等大字）、noise（非剧情文字）之一。
         """
+
+    private static let kindList =
+        "kind 只能是 dialogue（对白）、narration（旁白）、sfx（拟声词）、title（标题、宣传语等大字）、noise（非剧情文字）之一。"
+
+    /// 三种写法只有第 7 条和最后的格式说明不同
+    public static func systemPrompt(for format: ReplyFormat) -> String {
+        let emptyRule: String
+        let reply: String
+        switch format {
+        case .full:
+            emptyRule = "7. 框里其实没有文字时，kind 填 \"noise\"，source 和 translation 都留空。"
+            reply = """
+                只输出 json，不要输出任何解释。每个编号都要出现且只出现一次，id 与编号一致。格式如下：
+                {"blocks": [{"id": 1, "source": "核对后的原文", "translation": "中文译文", "kind": "dialogue"}], "new_terms": [{"source": "原文专有名词", "translation": "中文译名"}]}
+                \(kindList)
+                """
+        case .noSource:
+            emptyRule = "7. 框里其实没有文字时，kind 填 \"noise\"，translation 留空。"
+            reply = """
+                只输出 json，不要输出任何解释，也不要抄写原文。每个编号都要出现且只出现一次，id 与编号一致。格式如下：
+                {"blocks": [{"id": 1, "translation": "中文译文", "kind": "dialogue"}], "new_terms": [{"source": "原文专有名词", "translation": "中文译名"}]}
+                \(kindList)
+                """
+        case .compact:
+            emptyRule = "7. 框里其实没有文字时，kind 填 \"noise\"，translation 留空。"
+            reply = """
+                只输出 json，不要输出任何解释，也不要抄写原文。每个编号都要出现且只出现一次。格式如下：
+                {"blocks": [[1, "dialogue", "中文译文"], [2, "noise", ""]], "new_terms": [["原文专有名词", "中文译名"]]}
+                blocks 里每一项依次是编号、kind、translation；new_terms 里每一项依次是原文和译名，没有就写 []。
+                \(kindList)
+                """
+        }
+        return instructions + "\n" + emptyRule + "\n\n" + reply
+    }
 
     public func userPrompt(
         blocks: [TextBlock], languageName: String, readingOrder: ReadingOrder, memory: TranslationMemory
@@ -135,7 +192,8 @@ public struct PageTranslator: Sendable {
     /// markedImage 为带编号框的 JPEG；sendImage 为 false 时不会附上
     public func makePrompt(prompt: String, markedImage: Data, omitImage: Bool = false) -> LLMPrompt {
         LLMPrompt(
-            system: Self.systemPrompt, user: prompt, jpeg: sendImage ? markedImage : nil, maxTokens: 4096,
+            system: Self.systemPrompt(for: replyFormat), user: prompt, jpeg: sendImage ? markedImage : nil,
+            maxTokens: 4096,
             omitsImageData: omitImage)
     }
 
@@ -195,7 +253,21 @@ struct TranslationOutput: Decodable {
 
         // 模型偶尔会把 id 写成字符串，或者省略空字段，这里都兼容
         init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
+            guard let container = try? decoder.container(keyedBy: CodingKeys.self) else {
+                // 精简写法：[编号, kind, 译文]
+                var array = try decoder.unkeyedContainer()
+                if let number = try? array.decode(Int.self) {
+                    id = number
+                } else if let text = try? array.decode(String.self), let number = Int(text) {
+                    id = number
+                } else {
+                    throw DecodingError.dataCorruptedError(in: array, debugDescription: "id 不是数字")
+                }
+                source = ""
+                kind = (try? array.decode(String.self)) ?? "dialogue"
+                translation = (try? array.decode(String.self)) ?? ""
+                return
+            }
             if let number = try? container.decode(Int.self, forKey: .id) {
                 id = number
             } else if let text = try? container.decode(String.self, forKey: .id), let number = Int(text) {

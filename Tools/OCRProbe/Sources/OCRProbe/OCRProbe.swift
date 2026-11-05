@@ -36,6 +36,7 @@ let usage = """
     用法：
       ocrprobe run <输入目录> <输出目录> [--lang ja-JP,ko-KR] [--gap 0.6]
       ocrprobe translate <样本目录> <识别结果目录> <输出目录> [--limit 3] [--text-only] [--thinking] [--dry-run]
+                         [--reply-format full|nosource|compact]   逗号分隔写多个时，每页各写法各翻一次并生成对比报告
                          [--format openai|anthropic] [--base-url <地址>] [--model <模型名>] [--no-json-mode] [--timeout <秒>] [--no-key]
       ocrprobe ping [--format …] [--base-url …] [--model …]   测试连接：只发一条很短的文字请求
       ocrprobe fixtures <输出目录>     生成合成测试页

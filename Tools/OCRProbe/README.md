@@ -71,6 +71,18 @@ open output/translate/report.html
 - `--text-only`：只发文字不发图片，用来对比有图和没图的翻译效果
 - `--thinking`：开启 DeepSeek 的思考模式，更慢也更贵，用来对比难页的效果（只对 DeepSeek 生效）
 - `--dry-run`：试运行，不联网也不需要 Key，在 `requests/` 里生成每页要发送的请求内容（图片内容省略），方便核对
+- `--reply-format full|nosource|compact`：模型回复的写法，默认 `full`（App 现在用的）。`nosource` 不再抄写原文；`compact` 每块写成 `[编号, 类型, 译文]` 数组，也不抄原文。后两种回复更短、生成更快，可能影响翻译质量
+
+### 对比回复写法
+
+`--reply-format` 用逗号写多个时，每页把各种写法各翻一次（每页换一个先后顺序，免得某种写法总碰上同样的网络状况），每种写法各自积累术语和前文：
+
+```bash
+swift run --package-path Tools/OCRProbe ocrprobe translate samples output/ocr-probe output/reply-compare \
+  --reply-format full,nosource,compact
+```
+
+请求次数是页数乘以写法数，费用也相应翻倍。完成后打开 `output/reply-compare/compare.html`：上面是各写法的成功率、重试次数、平均和最慢耗时、平均输入输出 token、模型漏掉的块数；耗时和 token 只统计所有写法都成功的页。下面每页一张表，并排列出各写法的类型和译文，类型和 `full` 不一样的格子标成黄色。各写法的完整报告在对应的子目录里，`compare.json` 是同样内容的数据文件。
 
 换模型服务（和 App 设置里的含义一样）：
 - `--format openai|anthropic`：接口格式，默认 `openai`（OpenAI 兼容）

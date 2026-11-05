@@ -22,7 +22,7 @@ private func renderTranslateHTML(_ run: TranslateRun) -> String {
     if run.dryRun {
         summary.append("<p class=\"warn\">试运行：没有联网，“译文”一栏显示的是识别原文，只用来检查发送内容和预览排版。</p>")
     } else {
-        let mode = (run.sendImage ? "图片 + 识别文字" : "仅识别文字") + (run.thinking ? "，开启思考" : "")
+        let mode = (run.sendImage ? "图片 + 识别文字" : "仅识别文字") + (run.thinking ? "，开启思考" : "") + "，回复写法 \(run.replyFormat)"
         summary.append("<p>模型 \(escapeHTML(run.model))（\(mode)） · \(escapeHTML(run.endpoint)) · 共 \(run.pages.count) 页，成功 \(requested.count) 页，失败 \(failed.count) 页 · 成功页平均 \(averageMs) ms</p>")
         let cached = usage.cachedInputTokens.map { "（其中缓存命中 \($0)）" } ?? ""
         summary.append("<p>token：输入 \(usage.inputTokens)\(cached) · 输出 \(usage.outputTokens)</p>")
