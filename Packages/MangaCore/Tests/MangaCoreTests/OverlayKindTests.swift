@@ -26,16 +26,13 @@ struct OverlayKindTests {
         #expect(!block(kind: "title", translation: "").shouldOverlay)
     }
 
-    @Test func 拟声词标题和特别大的字用小标签显示() {
-        #expect(block(kind: "sfx").showsAsLabel(imageWidth: 1000, fallbackCharacterSize: 30))
-        #expect(block(kind: "title").showsAsLabel(imageWidth: 1000, fallbackCharacterSize: 30))
-        // 普通对白盖住原文
-        #expect(!block(kind: "dialogue", characterSize: 30).showsAsLabel(imageWidth: 1000, fallbackCharacterSize: 30))
-        // 字号达到图片宽度的 7% 就算排版大字
-        #expect(block(kind: "narration", characterSize: 70).showsAsLabel(imageWidth: 1000, fallbackCharacterSize: 30))
-        #expect(!block(kind: "narration", characterSize: 69).showsAsLabel(imageWidth: 1000, fallbackCharacterSize: 30))
-        // 没有自己的字号估计时用整页字号
-        #expect(block(kind: "dialogue", characterSize: nil).showsAsLabel(imageWidth: 1000, fallbackCharacterSize: 80))
+    @Test func 只有拟声词和标题用小标签_字再大的对白也盖住气泡() {
+        #expect(block(kind: "sfx").showsAsLabel)
+        #expect(block(kind: "title").showsAsLabel)
+        #expect(!block(kind: "dialogue", characterSize: 30).showsAsLabel)
+        // 条漫里喊出来的台词，字号有图片宽度的 7% 以上
+        #expect(!block(kind: "dialogue", characterSize: 80).showsAsLabel)
+        #expect(!block(kind: "narration", characterSize: 120).showsAsLabel)
     }
 
     @Test func 前文只记对白和旁白() {

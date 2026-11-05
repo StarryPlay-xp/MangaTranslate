@@ -11,7 +11,8 @@ nonisolated struct CachedImageTranslation: Codable, Sendable {
 enum TranslationCache {
     /// 提示词或贴字规则改了就加一，让旧缓存失效。
     /// 2：拟声词、标题也贴译文（旧缓存里没有这些块）
-    private static let version = 2
+    /// 3：只有拟声词、标题用小标签，小标签字号跟对白一样（旧缓存里字大的对白也标成了小标签）
+    private static let version = 3
 
     private static var directory: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]

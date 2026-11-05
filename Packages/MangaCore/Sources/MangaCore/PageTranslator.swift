@@ -53,17 +53,9 @@ public struct TranslatedBlock: Codable, Sendable {
 
     private static let overlaidKinds: Set<String> = ["dialogue", "narration", "sfx", "title"]
 
-    /// 原文字号达到图片宽度的这个比例，就算排版大字：模型标成了对白或旁白也用小标签显示
-    public static let largeTextRatio = 0.07
-
-    /// 用不挡画面的小标签显示，不盖住原文：拟声词、标题宣传语，以及原文字特别大的块。
-    /// fallbackCharacterSize 是块里没认出字、没有字号估计时用的整页（整段）字号
-    public func showsAsLabel(imageWidth: Double, fallbackCharacterSize: Double) -> Bool {
-        if kind == "sfx" || kind == "title" { return true }
-        guard imageWidth > 0 else { return false }
-        let size = characterSize.map(Double.init) ?? fallbackCharacterSize
-        return size / imageWidth >= Self.largeTextRatio
-    }
+    /// 拟声词、标题宣传语：用不挡画面的小标签显示，不盖住原文。
+    /// 只看模型标的类型，不看字号：条漫里喊出来的台词字也很大，按字号判断会让同样的气泡一个盖住、一个贴标签
+    public var showsAsLabel: Bool { kind == "sfx" || kind == "title" }
 }
 
 public struct PageTranslation: Sendable {
@@ -110,7 +102,7 @@ public struct PageTranslator: Sendable {
         2. 结合画面、说话人和前文判断语气，译文要像中文漫画的台词，简短自然，不要逐字直译。
         3. 人名、地名、门派、招式等专有名词沿用术语表的译法；遇到术语表里没有的新专有名词，在 new_terms 里给出建议译名。
         4. 网站水印、广告、网址、界面按钮、页码等不属于剧情的文字，kind 填 "noise"，translation 留空。
-        5. 拟声词 kind 填 "sfx"，translation 给出简短的中文拟声词。
+        5. 拟声词 kind 填 "sfx"，translation 给出简短的中文拟声词。气泡里的台词哪怕字很大、是在喊叫，也是 dialogue。
         6. 作品标题、章节标题、宣传语、作者名等排成大字或艺术字的文字，kind 填 "title"，translation 给出简短的中文；和中文写法完全一样的（比如汉字人名），translation 留空。
         7. 框里其实没有文字时，kind 填 "noise"，source 和 translation 都留空。
 

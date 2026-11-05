@@ -96,12 +96,14 @@ nonisolated struct ImageOverlayItem: Codable, Sendable {
                 .offsetBy(dx: segment.rect.minX, dy: segment.rect.minY)
                 .intersection(bounds)
             let fontSize = block.characterSize.map { CGFloat($0) } ?? segment.characterSize
+            // 小标签和这一段的对白一样大（整段字号多半就是对白的字号），原文更小时跟着原文
+            let label = block.showsAsLabel
             return ImageOverlayItem(
                 x: rect.minX / width, y: rect.minY / height,
                 width: rect.width / width, height: rect.height / height,
                 text: block.translation, vertical: block.direction == .vertical,
-                fontScale: fontSize / width,
-                label: block.showsAsLabel(imageWidth: width, fallbackCharacterSize: segment.characterSize))
+                fontScale: (label ? min(fontSize, segment.characterSize) : fontSize) / width,
+                label: label)
         }
     }
 }

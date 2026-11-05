@@ -12,7 +12,7 @@ func renderTranslated(image: CGImage, blocks: [TranslatedBlock], characterSize: 
 
     let padding = max(4, characterSize * 0.25)
     for block in blocks where block.shouldOverlay {
-        if block.showsAsLabel(imageWidth: pageSize.width, fallbackCharacterSize: characterSize) {
+        if block.showsAsLabel {
             drawLabel(block, characterSize: characterSize, pageSize: pageSize, context: context)
             continue
         }
@@ -77,10 +77,12 @@ private func drawFittedText(
     CTFrameDraw(frame, context)
 }
 
-/// 小标签：和 App 一样，字号不超过页宽的 3.2%，最宽为原文宽度和页宽 35% 里较大的那个，超出页面时往回挪
+/// 小标签：和 App 一样，字号跟整页对白一样（原文更小时跟着原文），不超过页宽的 5%；
+/// 最宽为原文宽度和页宽 35% 里较大的那个，超出页面时往回挪
 private func drawLabel(_ block: TranslatedBlock, characterSize: CGFloat, pageSize: CGSize, context: CGContext) {
     let original = block.box.rect
-    let fontSize = max(min(block.characterSize.map { CGFloat($0) } ?? characterSize, pageSize.width * 0.032), 12)
+    let ownSize = block.characterSize.map { CGFloat($0) } ?? characterSize
+    let fontSize = max(min(ownSize, characterSize, pageSize.width * 0.05), 12)
     let maxWidth = min(max(original.width, pageSize.width * 0.35), pageSize.width * 0.9)
     let string = attributedText(
         block.translation, fontName: "PingFangSC-Semibold", size: fontSize, color: CGColor(gray: 0.07, alpha: 1),

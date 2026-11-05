@@ -50,10 +50,11 @@ enum OverlayScript {
             'transition:opacity 0.15s',
           ].join(';');
           const labelFontRatio = \(OverlayItem.labelFontRatio);
+          const labelMinFont = \(OverlayItem.labelMinFont);
 
           // 小标签的字号和最大宽度跟着图片（或屏幕）宽度走；超出右边、下边时往回挪
           const placeLabel = (el, left, top, fontSize, maxWidth, areaWidth, areaHeight) => {
-            el.style.fontSize = Math.max(Math.round(fontSize), 11) + 'px';
+            el.style.fontSize = Math.max(Math.round(fontSize), labelMinFont) + 'px';
             el.style.maxWidth = Math.round(maxWidth) + 'px';
             el.style.left = Math.max(0, Math.min(left, areaWidth - el.offsetWidth)) + 'px';
             el.style.top = Math.max(0, Math.min(top, areaHeight - el.offsetHeight)) + 'px';
@@ -439,8 +440,10 @@ struct OverlayItem: Encodable {
     /// 拟声词、标题这类大字：半透明小标签，不盖住原文
     var label: Bool
 
-    /// 小标签的字号上限（÷ 图片宽度），和普通对白差不多大
-    static let labelFontRatio = 0.032
+    /// 小标签的字号上限（÷ 图片宽度）：字号本身跟这一页的对白一样，这里只防止整页都是大字时标签太大
+    static let labelFontRatio = 0.05
+    /// 小标签的最小字号（CSS 像素），手机上看得清
+    static let labelMinFont = 13
 
     /// 把截图上的像素坐标换算到网页文档坐标；框向外扩一点，盖住原文的边缘
     static func items(
@@ -452,8 +455,8 @@ struct OverlayItem: Encodable {
         return blocks.filter(\.shouldOverlay).map { block in
             let rect = block.box.rect.insetBy(dx: -padding, dy: -padding)
             let fontSize = block.characterSize.map { CGFloat($0) } ?? characterSize
-            let label = block.showsAsLabel(imageWidth: imageSize.width, fallbackCharacterSize: characterSize)
-            let size = label ? min(fontSize, imageSize.width * labelFontRatio) : fontSize
+            let label = block.showsAsLabel
+            let size = label ? min(fontSize, characterSize, imageSize.width * labelFontRatio) : fontSize
             return OverlayItem(
                 x: viewport.left + rect.minX * scaleX,
                 y: viewport.top + rect.minY * scaleY,
@@ -461,7 +464,7 @@ struct OverlayItem: Encodable {
                 height: rect.height * scaleY,
                 text: block.translation,
                 vertical: block.direction == .vertical,
-                fontSize: max(size * scaleX, label ? 11 : 10),
+                fontSize: max(size * scaleX, label ? CGFloat(labelMinFont) : 10),
                 label: label)
         }
     }
