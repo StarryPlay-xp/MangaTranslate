@@ -10,6 +10,7 @@ enum BrowserDestination: Hashable {
 struct HomeView: View {
     @Environment(BookmarkStore.self) private var bookmarks
     @Environment(ReadingHistory.self) private var history
+    @Environment(AppSettings.self) private var settings
     @State private var path: [BrowserDestination] = []
     @State private var address = ""
     @State private var showingSettings = false
@@ -23,6 +24,7 @@ struct HomeView: View {
                     if let recent = history.recent {
                         continueSection(recent)
                     }
+                    SiteSection(onOpen: openSite)
                     shelfSection
                 }
                 .padding(.horizontal, Theme.pageMargin)
@@ -244,6 +246,12 @@ struct HomeView: View {
     private func openAddress() {
         guard let url = URL.addressBarDestination(address) else { return }
         path.append(.web(url))
+    }
+
+    /// 打开韩漫网站时原文语言切到韩语，日漫网站切到日语
+    private func openSite(_ site: MangaSite) {
+        settings.sourceLanguage = site.language
+        path.append(.web(site.url))
     }
 
     private static func relative(_ date: Date) -> String {
