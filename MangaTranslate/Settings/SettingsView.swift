@@ -204,7 +204,8 @@ struct SettingsView: View {
             }
             .confirmationDialog("清除阅读记录？", isPresented: $confirmingHistoryClear, titleVisibility: .visible) {
                 Button("清除阅读记录", role: .destructive) {
-                    history.clear(keepingCoversFor: bookmarks.items.map(\.url))
+                    history.clear()
+                    ThumbnailStore.removeUnused(bookmarks: bookmarks, history: history)
                     storageMessage = "已清除阅读记录"
                 }
             } message: {

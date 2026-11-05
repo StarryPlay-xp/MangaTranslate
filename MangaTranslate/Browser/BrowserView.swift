@@ -41,7 +41,7 @@ struct BrowserView: View {
             .sensoryFeedback(.selection, trigger: settings.autoTranslate)
             .sheet(isPresented: $showingSettings) { SettingsView() }
             .onAppear {
-                model.attach(settings: settings, history: history)
+                model.attach(settings: settings, history: history, bookmarks: bookmarks)
                 model.load(destination)
             }
             .onDisappear {
@@ -90,7 +90,7 @@ struct BrowserView: View {
             if model.canBookmark, let url = model.currentURL {
                 let saved = bookmarks.contains(url)
                 Button {
-                    Task { await model.toggleBookmark(in: bookmarks) }
+                    Task { await model.toggleBookmark() }
                 } label: {
                     Image(systemName: saved ? "star.fill" : "star")
                         .font(.system(size: 17, weight: .bold))

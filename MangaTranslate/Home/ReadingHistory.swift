@@ -36,12 +36,19 @@ final class ReadingHistory {
         UserDefaults.standard.set(try? JSONEncoder().encode(page), forKey: Self.key)
     }
 
-    /// 清除阅读记录，并删掉书架以外的封面缩略图。
-    /// 每次离开阅读页都会给那一页存封面，而记录只留最近一页，所以除了书架，别处都不再用到这些封面
-    func clear(keepingCoversFor shelf: [URL]) {
+    /// 清除阅读记录；封面要另外调用 ThumbnailStore.removeUnused 清理
+    func clear() {
         recent = nil
         UserDefaults.standard.removeObject(forKey: Self.key)
-        ThumbnailStore.removeAll(except: shelf)
+    }
+}
+
+extension ThumbnailStore {
+    /// 删掉书架和「继续看」都不再用的封面。
+    /// 每次离开阅读页都会给那一页存封面，而记录只留最近一页，所以移出书架、「继续看」换了一页、
+    /// 清除阅读记录之后都要清一次，不然封面会越积越多
+    static func removeUnused(bookmarks: BookmarkStore, history: ReadingHistory) {
+        removeAll(except: bookmarks.items.map(\.url) + [history.recent?.url].compactMap { $0 })
     }
 }
 

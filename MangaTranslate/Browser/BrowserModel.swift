@@ -41,6 +41,7 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     @ObservationIgnored private weak var settings: AppSettings?
     @ObservationIgnored private weak var history: ReadingHistory?
+    @ObservationIgnored private weak var bookmarks: BookmarkStore?
     @ObservationIgnored private let memoryBank: MemoryBank
     @ObservationIgnored private let messageProxy: ScriptMessageProxy
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
@@ -109,9 +110,10 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
         ]
     }
 
-    func attach(settings: AppSettings, history: ReadingHistory) {
+    func attach(settings: AppSettings, history: ReadingHistory, bookmarks: BookmarkStore) {
         self.settings = settings
         self.history = history
+        self.bookmarks = bookmarks
         autoTranslator.settings = settings
         autoTranslator.setEnabled(settings.autoTranslate)
     }
@@ -144,10 +146,12 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     var canBookmark: Bool { currentURL?.scheme?.hasPrefix("http") == true }
 
-    func toggleBookmark(in bookmarks: BookmarkStore) async {
-        guard let url = currentURL, canBookmark else { return }
+    func toggleBookmark() async {
+        guard let url = currentURL, canBookmark, let bookmarks, let history else { return }
         if bookmarks.contains(url) {
             bookmarks.remove(url: url)
+            // 正在看的这页还会在离开时记进「继续看」并重新截封面
+            ThumbnailStore.removeUnused(bookmarks: bookmarks, history: history)
             show(.info, "已移出书架")
         } else {
             if let thumbnail = await captureThumbnail() { ThumbnailStore.save(thumbnail, for: url) }
@@ -180,12 +184,20 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     /// 离开阅读页时记下看到哪里，并更新封面
     func saveReadingProgress(captureCover: Bool) async {
-        guard let url = webView.url, url.scheme?.hasPrefix("http") == true else { return }
+        guard let url = webView.url, url.scheme?.hasPrefix("http") == true, let history, let bookmarks else { return }
+        let previous = history.recent?.url
         let scale = max(webView.scrollView.zoomScale, 0.01)
-        history?.update(title: title, url: url, scrollY: webView.scrollView.contentOffset.y / scale)
+        history.update(title: title, url: url, scrollY: webView.scrollView.contentOffset.y / scale)
+        // 「继续看」换了一页，上一页不在书架上的话封面就没用了
+        if previous != url {
+            ThumbnailStore.removeUnused(bookmarks: bookmarks, history: history)
+        }
         guard captureCover else { return }
         lastThumbnailAt = Date()
-        if let thumbnail = await captureThumbnail() { ThumbnailStore.save(thumbnail, for: url) }
+        guard let thumbnail = await captureThumbnail() else { return }
+        // 截图要花时间，这期间可能已经换到别的页面；这一页既不是「继续看」也不在书架上就不存了
+        guard history.recent?.url == url || bookmarks.contains(url) else { return }
+        ThumbnailStore.save(thumbnail, for: url)
     }
 
     func dismissMessage() {
