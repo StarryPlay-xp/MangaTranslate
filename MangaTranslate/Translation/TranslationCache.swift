@@ -43,8 +43,10 @@ enum TranslationCache {
         }
     }
 
+    /// 网页文字的译文缓存也在这个目录里，一起清掉
     static func clear() {
         try? FileManager.default.removeItem(at: directory)
+        PageTextCache.shared.clearMemory()
     }
 
     private static func fileURL(for key: String) -> URL {

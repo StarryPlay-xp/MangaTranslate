@@ -8,6 +8,7 @@ final class AppSettings {
     private enum Keys {
         static let sourceLanguage = "sourceLanguage"
         static let autoTranslate = "autoTranslate"
+        static let translatePageText = "translatePageText"
         static let sendImage = "sendImage"
         static let dryRun = "dryRun"
         static let modelServices = "modelServices"
@@ -20,6 +21,10 @@ final class AppSettings {
     /// 浏览时自动翻译屏幕上和下方 1.5 屏以内的漫画图片
     var autoTranslate: Bool {
         didSet { UserDefaults.standard.set(autoTranslate, forKey: Keys.autoTranslate) }
+    }
+    /// 翻译网页上的日文、韩文文字（菜单、作品名、简介等），原地换成中文；关掉后恢复原文
+    var translatePageText: Bool {
+        didSet { UserDefaults.standard.set(translatePageText, forKey: Keys.translatePageText) }
     }
     /// 把带编号框的截图发给模型；关掉后只发识别出的文字。当前模型服务不支持看图时也只发文字
     var sendImage: Bool {
@@ -49,6 +54,7 @@ final class AppSettings {
         sourceLanguage = defaults.string(forKey: Keys.sourceLanguage).flatMap(SourceLanguage.init(rawValue:)) ?? .japanese
         // 没设置过时默认开启；用 bool(forKey:) 读取，启动参数传入的 "YES"/"NO" 也能识别
         autoTranslate = defaults.object(forKey: Keys.autoTranslate) == nil ? true : defaults.bool(forKey: Keys.autoTranslate)
+        translatePageText = defaults.bool(forKey: Keys.translatePageText)
         sendImage = defaults.object(forKey: Keys.sendImage) == nil ? true : defaults.bool(forKey: Keys.sendImage)
         dryRun = defaults.bool(forKey: Keys.dryRun)
 

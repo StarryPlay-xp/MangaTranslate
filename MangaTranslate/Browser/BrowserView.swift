@@ -52,6 +52,9 @@ struct BrowserView: View {
             .onChange(of: settings.autoTranslate) { _, enabled in
                 model.setAutoTranslate(enabled)
             }
+            .onChange(of: settings.translatePageText) { _, enabled in
+                model.setTranslatePageText(enabled)
+            }
             .onChange(of: settings.sourceLanguage) {
                 model.retranslateAll()
             }
@@ -64,6 +67,15 @@ struct BrowserView: View {
                 guard count == 1 else { return }
                 // 调试用：-editAddress 加载完进入地址栏编辑；-addressInput <文字> 模拟在地址栏里输入后前往
                 if ProcessInfo.processInfo.arguments.contains("-editAddress") { editingAddress = true }
+                // 调试用：-pageTextToggleTest 加载完 6 秒后关掉网页文字翻译，再过 3 秒打开，检查恢复原文和换回译文
+                if ProcessInfo.processInfo.arguments.contains("-pageTextToggleTest") {
+                    Task {
+                        try? await Task.sleep(for: .seconds(6))
+                        settings.translatePageText = false
+                        try? await Task.sleep(for: .seconds(3))
+                        settings.translatePageText = true
+                    }
+                }
                 if let input = UserDefaults.standard.string(forKey: "addressInput"),
                    let url = URL.addressBarDestination(input) {
                     model.open(url)
@@ -159,6 +171,7 @@ struct BrowserView: View {
                     Text(language.displayName).tag(language)
                 }
             }
+            Toggle("翻译网页文字", systemImage: "character.bubble", isOn: $settings.translatePageText)
             Button("只翻译这一屏", systemImage: "rectangle.dashed") {
                 Task { await model.translateVisibleArea(settings: settings) }
             }

@@ -25,6 +25,7 @@ struct BrowserMessage: Equatable, Identifiable {
 final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
     let webView: WKWebView
     let autoTranslator: AutoTranslator
+    let pageText: PageTextTranslator
     private(set) var title = ""
     private(set) var currentURL: URL?
     private(set) var canGoBack = false
@@ -38,7 +39,7 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
     private(set) var finishedLoads = 0
 
     /// 翻译按钮上要不要显示"正在翻译"
-    var isBusy: Bool { isTranslatingScreen || autoTranslator.pendingCount > 0 }
+    var isBusy: Bool { isTranslatingScreen || autoTranslator.pendingCount > 0 || pageText.pendingCount > 0 }
 
     @ObservationIgnored private weak var settings: AppSettings?
     @ObservationIgnored private weak var history: ReadingHistory?
@@ -51,6 +52,8 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
     @ObservationIgnored private var messageTask: Task<Void, Never>?
     /// 当前提示气泡里累计的失败张数，合并成一条提示
     @ObservationIgnored private var failureCount = 0
+    /// 当前提示气泡里累计的网页文字失败批数
+    @ObservationIgnored private var textFailureCount = 0
     /// 上一次收起或放出工具栏时的滚动位置
     @ObservationIgnored private var lastOffsetY: CGFloat = 0
     /// 上一次收到滚动通知时的位置（不含回弹）
@@ -64,6 +67,8 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
         let controller = configuration.userContentController
         controller.addUserScript(WKUserScript(
             source: OverlayScript.source, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: .defaultClient))
+        controller.addUserScript(WKUserScript(
+            source: PageTextScript.source, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: .defaultClient))
         // 手势脚本要进每个 frame：有的阅读器放在 iframe 里；尽早注入，抢在网页自己的触摸监听之前
         controller.addUserScript(WKUserScript(
             source: ChromeGestureScript.source, injectionTime: .atDocumentStart, forMainFrameOnly: false,
@@ -76,6 +81,7 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
         self.messageProxy = proxy
         self.memoryBank = memoryBank
         autoTranslator = AutoTranslator(webView: webView, memoryBank: memoryBank)
+        pageText = PageTextTranslator(webView: webView, memoryBank: memoryBank)
         super.init()
 
         messageProxy.receiver = self
@@ -96,6 +102,17 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
         }
         autoTranslator.onBlocked = { [weak self] reason, needsSettings in
             self?.settings?.autoTranslate = false
+            self?.show(needsSettings ? .needsSettings : .error, reason)
+        }
+        pageText.onError = { [weak self] reason in
+            guard let self else { return }
+            textFailureCount += 1
+            show(.error, textFailureCount == 1
+                ? "有一部分网页文字没翻译成功：\(reason)"
+                : "有 \(textFailureCount) 批网页文字没翻译成功，刷新网页可以重试")
+        }
+        pageText.onBlocked = { [weak self] reason, needsSettings in
+            self?.settings?.translatePageText = false
             self?.show(needsSettings ? .needsSettings : .error, reason)
         }
 
@@ -130,6 +147,9 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
         autoTranslator.settings = settings
         autoTranslator.usage = usage
         autoTranslator.setEnabled(settings.autoTranslate)
+        pageText.settings = settings
+        pageText.usage = usage
+        pageText.setEnabled(settings.translatePageText)
     }
 
     func load(_ destination: BrowserDestination) {
@@ -179,6 +199,15 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
         }
     }
 
+    /// 打开或关闭网页文字翻译；关闭时网页恢复原文，再打开时已经翻译过的直接换回译文
+    func setTranslatePageText(_ enabled: Bool) {
+        pageText.setEnabled(enabled)
+        if enabled, message?.kind == .needsSettings { dismissMessage() }
+        // 出错自动关掉时，留着错误提示，让用户知道为什么停了
+        if !enabled, message?.kind == .error || message?.kind == .needsSettings { return }
+        show(.info, enabled ? "已开启网页文字翻译" : "已恢复网页原文")
+    }
+
     func setAutoTranslate(_ enabled: Bool) {
         autoTranslator.setEnabled(enabled)
         if enabled, message?.kind == .needsSettings { dismissMessage() }
@@ -198,6 +227,7 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
     /// 换了原文语言后，已经翻译过的图按新语言重新翻译
     func retranslateAll() {
         autoTranslator.resetAll()
+        pageText.reset()
         Task { _ = try? await webView.runIsolatedScript("window.__mangaTranslate?.clear()") }
     }
 
@@ -223,18 +253,30 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
         messageTask?.cancel()
         message = nil
         failureCount = 0
+        textFailureCount = 0
     }
 
     func receiveScriptMessage(_ body: String) {
         struct Message: Decodable {
             var type: String
-            var items: [ImageCandidate]?
             var action: String?
+            var doc: String?
         }
-        guard let message = try? JSONDecoder().decode(Message.self, from: Data(body.utf8)) else { return }
+        struct Items<Item: Decodable>: Decodable {
+            var items: [Item]
+        }
+        let data = Data(body.utf8)
+        let decoder = JSONDecoder()
+        guard let message = try? decoder.decode(Message.self, from: data) else { return }
         switch message.type {
         case "candidates":
-            autoTranslator.receive(message.items ?? [])
+            guard let payload = try? decoder.decode(Items<ImageCandidate>.self, from: data) else { return }
+            autoTranslator.receive(payload.items)
+        case "pageTextReady":
+            if let doc = message.doc { pageText.scriptReady(document: doc) }
+        case "pageText":
+            guard let doc = message.doc, let payload = try? decoder.decode(Items<PageTextItem>.self, from: data) else { return }
+            pageText.receive(document: doc, items: payload.items)
         case "chrome":
             // 网页里的手势：翻页时收起工具栏，点屏幕中间切换（见 ChromeGestureScript）
             switch message.action {
@@ -329,12 +371,14 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         autoTranslator.pageDidCommit()
+        pageText.pageDidCommit()
         chromeHidden = false
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         finishedLoads += 1
         autoTranslator.pageDidFinish()
+        pageText.pageDidFinish()
         if let url = webView.url { history?.update(title: title, url: url) }
         if let y = pendingRestoreY {
             pendingRestoreY = nil

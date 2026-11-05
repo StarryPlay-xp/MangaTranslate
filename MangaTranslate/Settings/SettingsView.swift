@@ -287,14 +287,14 @@ struct SettingsView: View {
             SettingsToggleRow(title: "把图片发给模型", detail: imageDetail, isOn: $settings.sendImage)
             InkDivider()
             SettingsToggleRow(
-                title: "试运行", detail: "不调用模型，在原位置显示识别出的原文，用来检查识别效果", isOn: $settings.dryRun)
+                title: "试运行", detail: "不调用模型，在原位置显示识别出的原文，用来检查识别效果；网页文字会加上〔〕括号", isOn: $settings.dryRun)
         }
     }
 
     // MARK: - 存储
 
     private var storageSection: some View {
-        SettingsSection("存储", note: storageMessage ?? "翻译过的图片会按模型服务分别缓存译文，重看时直接显示、不再花钱；换了模型会重新翻译。术语记忆按网站保存人名等专有名词的译法，让前后译名一致。网页数据是各网站的登录状态、Cookie 和缓存，清除后要重新登录。") {
+        SettingsSection("存储", note: storageMessage ?? "翻译过的图片和网页文字会按模型服务分别缓存译文，重看时直接显示、不再花钱；换了模型会重新翻译。术语记忆按网站保存人名等专有名词的译法，让前后译名一致。网页数据是各网站的登录状态、Cookie 和缓存，清除后要重新登录。") {
             storageRow("译文缓存", value: ByteCountFormatter.string(fromByteCount: Int64(cacheSize), countStyle: .file)) {
                 TranslationCache.clear()
                 cacheSize = TranslationCache.sizeInBytes()
