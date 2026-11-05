@@ -54,6 +54,8 @@ final class AutoTranslator {
     @ObservationIgnored private var userAgent: String?
     /// 截图里没找到文字的 canvas 已经重新截过几次：可能截的时候还没画好
     @ObservationIgnored private var blankRetries: [String: Int] = [:]
+    /// 第几次重截前等多久：先快后慢，网络慢时总共也能等 6 秒
+    private static let blankRetryDelays: [Duration] = [.seconds(1), .seconds(2), .seconds(3)]
     /// 截图要先藏起译文层，同一时间只截一张
     @ObservationIgnored private var snapshotChain: Task<CGImage?, Never>?
     /// 只记录数量和耗时，不记录图片地址和文字内容
@@ -230,12 +232,14 @@ final class AutoTranslator {
     private func render(_ candidate: ImageCandidate, items: [ImageOverlayItem], generation: Int) async {
         guard generation == self.generation else { return }
         let id = candidate.id
-        // canvas 没找到文字可能是还没画好（截到空白或加载图），过 2.5 秒再截，最多再截两次
-        if candidate.isCanvas, items.isEmpty, blankRetries[id, default: 0] < 2 {
-            blankRetries[id, default: 0] += 1
+        // canvas 没找到文字可能是还没画好（截到空白或加载图），过一会儿再截，最多再截三次
+        let retries = blankRetries[id, default: 0]
+        if candidate.isCanvas, items.isEmpty, retries < Self.blankRetryDelays.count {
+            blankRetries[id] = retries + 1
             await mark(id, state: "waiting", generation: generation)
+            let delay = Self.blankRetryDelays[retries]
             Task { [weak self] in
-                try? await Task.sleep(for: .seconds(2.5))
+                try? await Task.sleep(for: delay)
                 await self?.mark(id, state: nil, generation: generation)
             }
             return

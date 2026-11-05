@@ -74,6 +74,7 @@ enum OverlayScript {
           let autoEnabled = false;
           let nextId = 0;
           let scanTimer = null;
+          let scanDue = 0;
           let repositionQueued = false;
 
           const post = (message) => {
@@ -100,7 +101,7 @@ enum OverlayScript {
           const canvasMoves = new Map();
 
           // 找出屏幕上和下方 1.5 屏以内、已经加载好的大图，按离屏幕的远近报给 App；
-          // canvas 只在完整停在屏幕上 0.4 秒后才报，还在动（翻页动画）就过一会儿再看
+          // canvas 只在完整停在屏幕上 0.15 秒后才报，还在动（翻页动画）就 0.1 秒后再看
           const scan = () => {
             scanTimer = null;
             if (!autoEnabled) return;
@@ -138,15 +139,23 @@ enum OverlayScript {
                 canvasMoves.set(id, { key, since: now });
                 moving = true;
               } else if (fullyVisible(rect, area)) {
-                if (now - seen.since >= 400) items.push({ id, src: '', distance: 0, kind: 'canvas' });
+                if (now - seen.since >= 150) items.push({ id, src: '', distance: 0, kind: 'canvas' });
                 else moving = true;
               }
             }
             post({ type: 'candidates', items });
-            if (moving) scheduleScan(450);
+            if (moving) scheduleScan(100);
           };
+          // 已经约好的扫描比这次要求的晚，就提前到这次要求的时间
           const scheduleScan = (delay = 250) => {
-            if (autoEnabled && !scanTimer) scanTimer = setTimeout(scan, delay);
+            if (!autoEnabled) return;
+            const due = performance.now() + delay;
+            if (scanTimer) {
+              if (due >= scanDue) return;
+              clearTimeout(scanTimer);
+            }
+            scanDue = due;
+            scanTimer = setTimeout(scan, delay);
           };
 
           // 让译文层对齐图片当前的位置和大小；图片宽度变了就重新排字号
@@ -220,8 +229,9 @@ enum OverlayScript {
               tracking = false;
             }
           };
-          const onInteraction = () => {
-            scheduleScan();
+          // 过渡或动画刚结束多半是翻页停下了，马上看一次 canvas 停稳没有
+          const onInteraction = (event) => {
+            scheduleScan(event.type === 'transitionend' || event.type === 'animationend' ? 30 : 250);
             trackUntil = performance.now() + 1000;
             if (!tracking && images.size > 0) {
               tracking = true;
