@@ -12,8 +12,8 @@ struct ImageCandidate: Decodable {
     var distance: Double
 }
 
-/// 自动翻译：网页脚本报告屏幕附近的漫画图片，这里按离屏幕的远近排队，同时最多翻译 2 张。
-/// 翻译过的图存进缓存，再次出现时直接显示
+/// 自动翻译：网页脚本报告屏幕附近的漫画图片，这里按离屏幕的远近排队，同时最多翻译 2 张
+///（局域网里的本地模型一次只翻 1 张）。翻译过的图存进缓存，再次出现时直接显示
 @Observable
 final class AutoTranslator {
     /// 排队中和正在翻译的图片数，用来显示进度
@@ -22,8 +22,8 @@ final class AutoTranslator {
     @ObservationIgnored var settings: AppSettings?
     /// 单张图失败时的提示
     @ObservationIgnored var onError: ((String) -> Void)?
-    /// 缺少 Key、Key 无效或余额不足时调用：自动翻译已经停下，需要用户处理。
-    /// 第二个参数表示要不要去设置里处理（填写或更换 Key）
+    /// 缺少 Key、Key 无效、余额不足、地址或模型不对、连不上服务时调用：自动翻译已经停下，需要用户处理。
+    /// 第二个参数表示要不要去设置里处理（填写 Key、改地址或模型）
     @ObservationIgnored var onBlocked: ((String, Bool) -> Void)?
 
     @ObservationIgnored private let webView: WKWebView
@@ -38,7 +38,11 @@ final class AutoTranslator {
     @ObservationIgnored private var userAgent: String?
     /// 只记录数量和耗时，不记录图片地址和文字内容
     @ObservationIgnored private let logger = Logger(subsystem: "io.github.starryplay-xp.MangaTranslate", category: "auto")
-    private let maxConcurrent = 2
+
+    private var maxConcurrent: Int {
+        guard let settings, !settings.dryRun else { return 2 }
+        return settings.activeService.maxConcurrentRequests
+    }
 
     init(webView: WKWebView, memoryBank: MemoryBank) {
         self.webView = webView
@@ -104,19 +108,30 @@ final class AutoTranslator {
         guard let settings else { return }
         // 开始时就记下设置，翻译过程中用户改了设置也不影响这一张
         let language = settings.sourceLanguage
-        let sendImage = settings.sendImage
+        let service = settings.activeService
+        let sendImage = settings.effectiveSendImage
         let dryRun = settings.dryRun
-        let cacheKey = TranslationCache.key(src: candidate.src, language: language, sendImage: sendImage)
+        let cacheKey = TranslationCache.key(
+            src: candidate.src, language: language, sendImage: sendImage, service: service.config)
 
         if !dryRun, let cached = TranslationCache.load(cacheKey) {
             logger.info("图片 \(candidate.id, privacy: .public)：命中缓存，\(cached.items.count) 处译文")
             await render(candidate.id, items: cached.items, generation: generation)
             return
         }
-        let apiKey = dryRun ? nil : KeychainStore.load()
-        if !dryRun && apiKey == nil {
-            block("还没有填写 DeepSeek API Key，自动翻译已暂停", needsSettings: true)
-            return
+        var client: (any LLMClient)?
+        if !dryRun {
+            let apiKey = settings.apiKey(for: service.id)
+            if apiKey == nil && service.requiresAPIKey {
+                block("「\(service.name)」还没有填写 API Key，自动翻译已暂停", needsSettings: true)
+                return
+            }
+            do {
+                client = try service.config.makeClient(apiKey: apiKey)
+            } catch {
+                block("「\(service.name)」\(error.localizedDescription)，自动翻译已暂停", needsSettings: true)
+                return
+            }
         }
 
         await mark(candidate.id, state: "pending", generation: generation)
@@ -130,14 +145,13 @@ final class AutoTranslator {
             for segment in prepared.segments {
                 guard generation == self.generation else { return }
                 let blocks: [TranslatedBlock]
-                if let apiKey {
+                if let client {
                     let translator = PageTranslator(sendImage: sendImage)
                     let prompt = translator.userPrompt(
                         blocks: segment.blocks, languageName: language.displayName,
                         readingOrder: language.readingOrder, memory: memoryBank.memory(for: host))
                     let result = try await translator.translate(
-                        blocks: segment.blocks, prompt: prompt, markedImage: segment.markedJPEG,
-                        using: DeepSeekClient(apiKey: apiKey))
+                        blocks: segment.blocks, prompt: prompt, markedImage: segment.markedJPEG, using: client)
                     memoryBank.record(result, host: host)
                     blocks = result.blocks
                 } else {
@@ -153,10 +167,11 @@ final class AutoTranslator {
             let seconds = (ContinuousClock.now - started) / .seconds(1)
             logger.info("图片 \(candidate.id, privacy: .public)：贴了 \(items.count) 处译文，用时 \(seconds, format: .fixed(precision: 1)) 秒")
             await render(candidate.id, items: items, generation: generation)
-        } catch let error as DeepSeekError where error.stopsWholeRun {
+        } catch let error as LLMServiceError where error.stopsWholeRun {
             // 去掉“翻译中”角标，问题解决后这张图还能重新翻译
             await mark(candidate.id, state: nil, generation: generation)
-            block(error.localizedDescription + "，自动翻译已暂停", needsSettings: error.status == 401)
+            logger.error("图片 \(candidate.id, privacy: .public)：模型服务不可用，自动翻译暂停：\(error.localizedDescription, privacy: .public)")
+            block(error.localizedDescription + "，自动翻译已暂停", needsSettings: error.needsSettings)
         } catch {
             logger.error("图片 \(candidate.id, privacy: .public) 翻译失败：\(error.localizedDescription, privacy: .public)")
             if generation == self.generation { handled.insert(candidate.id) }

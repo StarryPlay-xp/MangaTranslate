@@ -53,6 +53,10 @@ struct BrowserView: View {
             .onChange(of: settings.sourceLanguage) {
                 model.retranslateAll()
             }
+            // 换了模型服务（或改了它的地址、模型）后按新服务重新翻译；之前用过的服务有缓存，切回去直接显示
+            .onChange(of: settings.activeService) {
+                model.retranslateAll()
+            }
             #if DEBUG
             .onChange(of: model.finishedLoads) { _, count in
                 // 调试用：启动参数带 -translateScreen 时，页面加载完执行一次"只翻译这一屏"

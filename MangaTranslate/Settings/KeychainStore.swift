@@ -1,12 +1,17 @@
 import Foundation
 import Security
 
-/// DeepSeek API Key 存在钥匙串里：只保存在这台设备上，不随 iCloud 同步
+/// API Key 存在钥匙串里：只保存在这台设备上，不随 iCloud 同步。每个模型服务各存一把
 enum KeychainStore {
     private static let service = "io.github.starryplay-xp.MangaTranslate"
-    private static let account = "deepseek-api-key"
+    /// 第一版只存一把 DeepSeek Key 时用的账户名；升级后搬到 DeepSeek 配置里
+    static let legacyAccount = "deepseek-api-key"
 
-    private static var baseQuery: [String: Any] {
+    static func account(for serviceID: UUID) -> String {
+        "llm-api-key-" + serviceID.uuidString
+    }
+
+    private static func baseQuery(account: String) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -14,17 +19,17 @@ enum KeychainStore {
         ]
     }
 
-    static func save(_ key: String) throws {
-        SecItemDelete(baseQuery as CFDictionary)
-        var query = baseQuery
+    static func save(_ key: String, account: String) throws {
+        SecItemDelete(baseQuery(account: account) as CFDictionary)
+        var query = baseQuery(account: account)
         query[kSecValueData as String] = Data(key.utf8)
         query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         let status = SecItemAdd(query as CFDictionary, nil)
         guard status == errSecSuccess else { throw KeychainError(status: status) }
     }
 
-    static func load() -> String? {
-        var query = baseQuery
+    static func load(account: String) -> String? {
+        var query = baseQuery(account: account)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
@@ -34,8 +39,8 @@ enum KeychainStore {
         return String(data: data, encoding: .utf8)
     }
 
-    static func delete() {
-        SecItemDelete(baseQuery as CFDictionary)
+    static func delete(account: String) {
+        SecItemDelete(baseQuery(account: account) as CFDictionary)
     }
 }
 

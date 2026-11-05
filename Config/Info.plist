@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Info.plist 片段：Xcode 会把这里的内容和项目设置里的 INFOPLIST_KEY_* 合并成最终的 Info.plist。
+  只放 INFOPLIST_KEY_* 写不了的嵌套字典。这个文件放在 MangaTranslate/ 同步文件夹外面，
+  否则会被当成资源再打包一次，导致 "Multiple commands produce" 错误。
+-->
+<plist version="1.0">
+<dict>
+	<!-- 只允许对局域网地址（本机、.local、私有 IP 等）用 http:// 访问自己部署的模型；其他地址仍然必须用 https:// -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+</dict>
+</plist>

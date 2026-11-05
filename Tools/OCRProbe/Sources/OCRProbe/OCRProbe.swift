@@ -12,6 +12,8 @@ struct OCRProbe {
                 try await runProbe(RunOptions(parsing: args))
             case "translate":
                 try await runTranslate(TranslateOptions(parsing: args))
+            case "ping":
+                try await runPing(args)
             case "fixtures":
                 guard args.count == 1 else { throw ProbeError("用法：ocrprobe fixtures <输出目录>") }
                 try makeFixtures(in: URL(fileURLWithPath: args[0]))
@@ -29,15 +31,19 @@ struct OCRProbe {
 }
 
 let usage = """
-    ocrprobe：用 Apple Vision 识别漫画图片里的文字，再交给 DeepSeek 翻译，生成标注图和 HTML 报告
+    ocrprobe：用 Apple Vision 识别漫画图片里的文字，再交给大模型翻译，生成标注图和 HTML 报告
 
     用法：
       ocrprobe run <输入目录> <输出目录> [--lang ja-JP,ko-KR] [--gap 0.6]
       ocrprobe translate <样本目录> <识别结果目录> <输出目录> [--limit 3] [--text-only] [--thinking] [--dry-run]
+                         [--format openai|anthropic] [--base-url <地址>] [--model <模型名>] [--no-json-mode] [--timeout <秒>] [--no-key]
+      ocrprobe ping [--format …] [--base-url …] [--model …]   测试连接：只发一条很短的文字请求
       ocrprobe fixtures <输出目录>     生成合成测试页
       ocrprobe languages               列出 Vision 支持的识别语言
 
     输入目录下的第一级子目录名决定默认语言：ko 开头按韩漫处理，其余按日漫处理。
+    不指定模型服务时用 DeepSeek（deepseek-flash）。Key 从环境变量 LLM_API_KEY（或 DEEPSEEK_API_KEY）读取，
+    没有就在终端里隐藏输入，不会保存；局域网地址默认不要 Key。
     """
 
 struct ProbeError: LocalizedError {

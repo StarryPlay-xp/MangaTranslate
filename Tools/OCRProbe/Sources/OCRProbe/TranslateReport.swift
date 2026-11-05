@@ -13,7 +13,7 @@ func writeTranslateReport(_ run: TranslateRun, to output: URL) throws {
 private func renderTranslateHTML(_ run: TranslateRun) -> String {
     let requested = run.pages.filter { $0.usage != nil }
     let failed = run.pages.filter { $0.error != nil }
-    let usage = requested.compactMap(\.usage).reduce(DeepSeekClient.Usage.zero) { $0.adding($1) }
+    let usage = requested.compactMap(\.usage).reduce(LLMUsage.zero) { $0.adding($1) }
     let costs = requested.compactMap(\.costUSD)
     let totalCost = costs.reduce(0, +)
     let averageMs = requested.isEmpty ? 0 : requested.reduce(0) { $0 + $1.elapsedMs } / requested.count
@@ -22,13 +22,16 @@ private func renderTranslateHTML(_ run: TranslateRun) -> String {
     if run.dryRun {
         summary.append("<p class=\"warn\">试运行：没有联网，“译文”一栏显示的是识别原文，只用来检查发送内容和预览排版。</p>")
     } else {
-        let mode = (run.sendImage ? "图片 + 识别文字" : "仅识别文字") + (run.thinking ? "，开启思考" : "，关闭思考")
-        summary.append("<p>模型 \(escapeHTML(run.model))（\(mode)） · 共 \(run.pages.count) 页，成功 \(requested.count) 页，失败 \(failed.count) 页 · 成功页平均 \(averageMs) ms</p>")
-        summary.append("<p>token：输入 \(usage.promptTokens)（其中缓存命中 \(usage.promptCacheHitTokens ?? 0)） · 输出 \(usage.completionTokens)</p>")
+        let mode = (run.sendImage ? "图片 + 识别文字" : "仅识别文字") + (run.thinking ? "，开启思考" : "")
+        summary.append("<p>模型 \(escapeHTML(run.model))（\(mode)） · \(escapeHTML(run.endpoint)) · 共 \(run.pages.count) 页，成功 \(requested.count) 页，失败 \(failed.count) 页 · 成功页平均 \(averageMs) ms</p>")
+        let cached = usage.cachedInputTokens.map { "（其中缓存命中 \($0)）" } ?? ""
+        summary.append("<p>token：输入 \(usage.inputTokens)\(cached) · 输出 \(usage.outputTokens)</p>")
         if !costs.isEmpty {
             summary.append(String(
-                format: "<p>估算费用：共 $%.4f，平均每页 $%.5f（按 deepseek-flash 官方价，闲时、高峰按请求时间计算；成功页的重试已计入，失败页没有计入）</p>",
-                totalCost, totalCost / Double(costs.count)))
+                format: "<p>估算费用：共 $%.4f，平均每页 $%.5f（按 %@ 官方价，有高峰价的按请求时间计算；成功页的重试已计入，失败页没有计入）</p>",
+                totalCost, totalCost / Double(costs.count), escapeHTML(run.model)))
+        } else if !requested.isEmpty {
+            summary.append("<p>这个模型没有价格数据，只统计 token，不估算费用。</p>")
         }
     }
     if !run.glossary.isEmpty {
@@ -81,7 +84,7 @@ private func renderTranslatedPage(_ page: TranslatedPage) -> String {
 
     var meta = ["耗时 \(page.elapsedMs) ms", page.peak ? "高峰时段" : "闲时"]
     if page.attempts > 1 { meta.append("重试后第 \(page.attempts) 次成功") }
-    if let usage = page.usage { meta.append("输入 \(usage.promptTokens) / 输出 \(usage.completionTokens) token") }
+    if let usage = page.usage { meta.append("输入 \(usage.inputTokens) / 输出 \(usage.outputTokens) token") }
     if let cost = page.costUSD { meta.append(String(format: "约 $%.5f", cost)) }
 
     return """

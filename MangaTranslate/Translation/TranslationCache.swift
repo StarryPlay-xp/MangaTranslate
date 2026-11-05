@@ -6,8 +6,8 @@ nonisolated struct CachedImageTranslation: Codable, Sendable {
     var items: [ImageOverlayItem]
 }
 
-/// 已翻译图片的译文缓存，按图片地址保存在系统缓存目录。
-/// 重看同一话时直接显示，不再调用 DeepSeek；手机空间不足时系统可能会清掉这些文件
+/// 已翻译图片的译文缓存，按图片地址和所用的模型服务保存在系统缓存目录。
+/// 重看同一话时直接显示，不再调用模型；换了模型会重新翻译。手机空间不足时系统可能会清掉这些文件
 enum TranslationCache {
     /// 提示词或贴字规则改了就加一，让旧缓存失效
     private static let version = 1
@@ -17,8 +17,11 @@ enum TranslationCache {
             .appendingPathComponent("Translations", isDirectory: true)
     }
 
-    static func key(src: String, language: SourceLanguage, sendImage: Bool) -> String {
-        let digest = SHA256.hash(data: Data("v\(version)|\(language.rawValue)|\(sendImage)|\(src)".utf8))
+    /// 接口格式、完整请求地址和模型名都算进去，换服务或换模型后才会重新翻译
+    static func key(src: String, language: SourceLanguage, sendImage: Bool, service: LLMServiceConfig) -> String {
+        let endpoint = (try? service.endpoint().absoluteString) ?? service.baseURL
+        let parts = ["v\(version)", language.rawValue, "\(sendImage)", service.format.rawValue, endpoint, service.model, src]
+        let digest = SHA256.hash(data: Data(parts.joined(separator: "|").utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 

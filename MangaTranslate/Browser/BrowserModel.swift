@@ -205,7 +205,7 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
         }
     }
 
-    /// 只翻译这一屏：截取当前屏幕 → 本地识别文字 → DeepSeek 翻译 → 把译文贴回网页原位置。
+    /// 只翻译这一屏：截取当前屏幕 → 本地识别文字 → 模型翻译 → 把译文贴回网页原位置。
     /// 用于漫画不是普通图片（比如画在 canvas 上）的网站
     func translateVisibleArea(settings: AppSettings) async {
         guard !isTranslatingScreen else { return }
@@ -234,19 +234,27 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
             if settings.dryRun {
                 translated = page.blocks.map(TranslatedBlock.dryRun)
             } else {
-                guard let apiKey = KeychainStore.load() else {
-                    show(.needsSettings, "还没有填写 DeepSeek API Key")
+                let service = settings.activeService
+                let apiKey = settings.apiKey(for: service.id)
+                if apiKey == nil && service.requiresAPIKey {
+                    show(.needsSettings, "「\(service.name)」还没有填写 API Key")
+                    return
+                }
+                let client: any LLMClient
+                do {
+                    client = try service.config.makeClient(apiKey: apiKey)
+                } catch {
+                    show(.needsSettings, "「\(service.name)」\(error.localizedDescription)")
                     return
                 }
                 show(.progress, "正在翻译这一屏的 \(page.blocks.count) 处文字…")
                 let host = webView.url?.host() ?? "local"
-                let translator = PageTranslator(sendImage: settings.sendImage)
+                let translator = PageTranslator(sendImage: settings.effectiveSendImage)
                 let prompt = translator.userPrompt(
                     blocks: page.blocks, languageName: settings.sourceLanguage.displayName,
                     readingOrder: settings.sourceLanguage.readingOrder, memory: memoryBank.memory(for: host))
                 let result = try await translator.translate(
-                    blocks: page.blocks, prompt: prompt, markedImage: page.markedJPEG,
-                    using: DeepSeekClient(apiKey: apiKey))
+                    blocks: page.blocks, prompt: prompt, markedImage: page.markedJPEG, using: client)
                 memoryBank.record(result, host: host)
                 translated = result.blocks
             }
@@ -262,7 +270,7 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
             show(.info, items.isEmpty
                 ? "这一屏没有需要翻译的台词"
                 : String(format: "这一屏翻译了 %d 处，用时 %.1f 秒", items.count, seconds))
-        } catch let error as DeepSeekError where error.status == 401 {
+        } catch let error as LLMServiceError where error.needsSettings {
             _ = try? await webView.runIsolatedScript("window.__mangaTranslate?.show()")
             show(.needsSettings, error.localizedDescription)
         } catch {

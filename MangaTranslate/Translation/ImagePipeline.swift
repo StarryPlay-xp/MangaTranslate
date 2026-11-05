@@ -22,7 +22,7 @@ nonisolated struct PreparedImage: Sendable {
 }
 
 enum ImagePipeline {
-    /// 编号图最多 200 万像素：DeepSeek 本来就会缩到约 1300×1300，再大只是浪费流量
+    /// 编号图最多 200 万像素：DeepSeek 等模型本来就会缩到约 1300×1300，再大只是浪费流量
     nonisolated static let maxMarkedPixels = 2_000_000
 
     /// 解码、切段、识别、画编号图都在后台执行

@@ -53,7 +53,7 @@ public struct PageTranslation: Sendable {
     public var blocks: [TranslatedBlock]
     public var newTerms: [GlossaryTerm]
     /// 包含重试在内的用量
-    public var usage: DeepSeekClient.Usage
+    public var usage: LLMUsage
     public var attempts: Int
 }
 
@@ -73,19 +73,16 @@ public struct TranslationMemory: Codable, Sendable {
     }
 }
 
-/// 组织提示词、调用 DeepSeek 并解析一页的翻译结果
+/// 组织提示词、调用模型并解析一页的翻译结果
 public struct PageTranslator: Sendable {
-    public var model: String
-    public var thinking: Bool
+    /// 把带编号框的图片发给模型；模型不支持看图时应传 false
     public var sendImage: Bool
 
-    public init(model: String = DeepSeekPricing.pricedModel, thinking: Bool = false, sendImage: Bool = true) {
-        self.model = model
-        self.thinking = thinking
+    public init(sendImage: Bool = true) {
         self.sendImage = sendImage
     }
 
-    // 系统提示词保持不变，DeepSeek 会自动缓存相同的开头部分，重复请求更便宜
+    // 系统提示词保持不变：DeepSeek 等服务会自动缓存相同的开头部分，重复请求更便宜
     public static let systemPrompt = """
         你是经验丰富的漫画汉化译者，负责把日漫、韩漫里的文字翻译成自然、口语化的简体中文。
 
@@ -126,39 +123,28 @@ public struct PageTranslator: Sendable {
     }
 
     /// markedImage 为带编号框的 JPEG；sendImage 为 false 时不会附上
-    public func makeRequest(prompt: String, markedImage: Data, omitImage: Bool = false) -> ChatRequest {
-        let parts: [ChatRequest.Part] =
-            sendImage ? [.text(prompt), .jpeg(markedImage, omitted: omitImage)] : [.text(prompt)]
-        return ChatRequest(
-            model: model,
-            messages: [
-                .init(role: "system", content: .text(Self.systemPrompt)),
-                .init(role: "user", content: .parts(parts)),
-            ],
-            thinking: .init(type: thinking ? "enabled" : "disabled"),
-            maxTokens: 4096)
+    public func makePrompt(prompt: String, markedImage: Data, omitImage: Bool = false) -> LLMPrompt {
+        LLMPrompt(
+            system: Self.systemPrompt, user: prompt, jpeg: sendImage ? markedImage : nil, maxTokens: 4096,
+            omitsImageData: omitImage)
     }
 
     /// 发送请求并解析 json；网络错误、限流、空白或不合法的返回最多重试 3 次
     public func translate(
-        blocks: [TextBlock], prompt: String, markedImage: Data, using client: DeepSeekClient
+        blocks: [TextBlock], prompt: String, markedImage: Data, using client: any LLMClient
     ) async throws -> PageTranslation {
-        let request = makeRequest(prompt: prompt, markedImage: markedImage)
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        var usage = DeepSeekClient.Usage.zero
+        let request = makePrompt(prompt: prompt, markedImage: markedImage)
+        var usage = LLMUsage.zero
         var lastError: Error = MangaCoreError("未知错误")
         for attempt in 1...3 {
             do {
                 let reply = try await client.complete(request)
                 if let replyUsage = reply.usage { usage = usage.adding(replyUsage) }
-                let content = reply.content.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !content.isEmpty else { throw MangaCoreError("返回内容为空") }
-                let output = try decoder.decode(TranslationOutput.self, from: Data(content.utf8))
+                let output = try TranslationOutput.parse(reply.content)
                 return PageTranslation(
                     blocks: Self.merge(blocks, with: output), newTerms: output.newTerms ?? [],
                     usage: usage, attempts: attempt)
-            } catch let error as DeepSeekError where !error.isRetryable {
+            } catch let error as LLMServiceError where !error.isRetryable {
                 throw error
             } catch {
                 lastError = error
@@ -183,7 +169,7 @@ public struct PageTranslator: Sendable {
 }
 
 /// 模型返回的 json
-private struct TranslationOutput: Decodable {
+struct TranslationOutput: Decodable {
     struct Item: Decodable {
         var id: Int
         var source: String
@@ -210,4 +196,79 @@ private struct TranslationOutput: Decodable {
 
     var blocks: [Item]
     var newTerms: [GlossaryTerm]?
+
+    init(blocks: [Item], newTerms: [GlossaryTerm]?) {
+        self.blocks = blocks
+        self.newTerms = newTerms
+    }
+
+    /// 容错解析：去掉思考过程和 ```json 代码块，截取其中的 json；
+    /// 模型直接返回编号数组（没有外层 blocks）时也能识别
+    static func parse(_ content: String) throws -> TranslationOutput {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw MangaCoreError("返回内容为空")
+        }
+        for candidate in LLMJSON.candidates(in: content) {
+            let data = Data(candidate.utf8)
+            if let output = try? decoder.decode(TranslationOutput.self, from: data) { return output }
+            if let items = try? decoder.decode([Item].self, from: data) {
+                return TranslationOutput(blocks: items, newTerms: nil)
+            }
+        }
+        throw MangaCoreError("返回的内容里没有找到有效的 json")
+    }
+}
+
+/// 从模型回复里找出 json 文本
+public enum LLMJSON {
+    /// 按可能性从高到低排列的候选文本
+    public static func candidates(in content: String) -> [String] {
+        let text = stripThinking(content).trimmingCharacters(in: .whitespacesAndNewlines)
+        var results = [text]
+        if let fenced = fencedBlock(in: text) { results.append(fenced) }
+        for (open, close) in [("{", "}"), ("[", "]")] {
+            if let start = text.firstIndex(of: Character(open)), let end = text.lastIndex(of: Character(close)),
+               start < end {
+                results.append(String(text[start...end]))
+            }
+        }
+        var seen = Set<String>()
+        return results.filter { seen.insert($0).inserted }
+    }
+
+    /// 回复里有没有能解析的 json 对象或数组
+    public static func containsJSON(_ content: String) -> Bool {
+        candidates(in: content).contains { candidate in
+            guard let data = candidate.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data)
+            else { return false }
+            return object is [String: Any] || object is [Any]
+        }
+    }
+
+    /// 去掉本地推理模型放在正文里的 <think>…</think>；只有开头标签、没有结束标签时去掉整段
+    public static func stripThinking(_ content: String) -> String {
+        var text = content
+        for tag in ["think", "thinking"] {
+            while let open = text.range(of: "<\(tag)>") {
+                if let close = text.range(of: "</\(tag)>", range: open.upperBound..<text.endIndex) {
+                    text.removeSubrange(open.lowerBound..<close.upperBound)
+                } else {
+                    text.removeSubrange(open.lowerBound..<text.endIndex)
+                }
+            }
+        }
+        return text
+    }
+
+    private static func fencedBlock(in text: String) -> String? {
+        guard let open = text.range(of: "```") else { return nil }
+        // 跳过 ```json 这样的语言标记，到行尾为止
+        let afterOpen = text[open.upperBound...]
+        let bodyStart = afterOpen.firstIndex(of: "\n").map { text.index(after: $0) } ?? open.upperBound
+        guard let close = text.range(of: "```", range: bodyStart..<text.endIndex) else { return nil }
+        return String(text[bodyStart..<close.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }
