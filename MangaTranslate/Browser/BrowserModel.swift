@@ -60,7 +60,7 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
     @ObservationIgnored private var lastSeenOffsetY: CGFloat = 0
     @ObservationIgnored private var progressTask: Task<Void, Never>?
     @ObservationIgnored private var lastThumbnailAt = Date.distantPast
-    @ObservationIgnored private var pendingRestoreY: Double?
+    @ObservationIgnored private var pendingRestore: (y: Double, anchor: ReadingAnchor?)?
 
     override init() {
         let configuration = WKWebViewConfiguration()
@@ -160,8 +160,8 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
         switch destination {
         case .web(let url):
             webView.load(URLRequest(url: url))
-        case .resume(let url, let scrollY):
-            pendingRestoreY = scrollY > 0 ? scrollY : nil
+        case .resume(let url, let scrollY, let anchor):
+            pendingRestore = scrollY > 0 ? (scrollY, anchor) : nil
             webView.load(URLRequest(url: url))
         case .demo:
             guard var page = Bundle.main.url(forResource: "demo", withExtension: "html") else {
@@ -238,7 +238,10 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
         guard let url = webView.url, url.scheme?.hasPrefix("http") == true, let history, let bookmarks else { return }
         let previous = history.recent?.url
         let scale = max(webView.scrollView.zoomScale, 0.01)
-        history.update(title: title, url: url, scrollY: webView.scrollView.contentOffset.y / scale)
+        let anchor = await readReadingAnchor()
+        // 读锚点要等网页回复，这期间可能已经换到别的页面
+        guard webView.url == url else { return }
+        history.update(title: title, url: url, scrollY: webView.scrollView.contentOffset.y / scale, anchor: anchor)
         // 「继续看」换了一页，上一页不在书架上的话封面就没用了
         if previous != url {
             ThumbnailStore.removeUnused(bookmarks: bookmarks, history: history)
@@ -279,6 +282,8 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
         case "pageText":
             guard let doc = message.doc, let payload = try? decoder.decode(Items<PageTextItem>.self, from: data) else { return }
             pageText.receive(document: doc, items: payload.items)
+        case "screenCleared":
+            show(.info, "页面宽度变了，「只翻译这一屏」的译文已清除，可以再翻译一次")
         case "chrome":
             // 网页里的手势：翻页时收起工具栏，点屏幕中间切换（见 ChromeGestureScript）
             switch message.action {
@@ -349,6 +354,11 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
                 translated = result.blocks
             }
 
+            // 翻译期间转了屏或调了窗口大小，网页已经重新排版，按截图时的位置贴会对不上
+            guard try await readViewport().layoutWidth == viewport.layoutWidth else {
+                show(.info, "翻译期间页面宽度变了，译文没有贴上，请再翻译一次")
+                return
+            }
             let items = OverlayItem.items(
                 for: translated, imageSize: page.imageSize, characterSize: page.characterSize, covers: page.covers,
                 viewport: viewport)
@@ -383,9 +393,9 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
         autoTranslator.pageDidFinish()
         pageText.pageDidFinish()
         if let url = webView.url { history?.update(title: title, url: url) }
-        if let y = pendingRestoreY {
-            pendingRestoreY = nil
-            Task { await restoreScroll(to: y) }
+        if let restore = pendingRestore {
+            pendingRestore = nil
+            Task { await restoreScroll(to: restore.y, anchor: restore.anchor) }
         }
     }
 
@@ -439,18 +449,21 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
         }
     }
 
-    /// 回到上次看到的位置。网页内容可能还在加载、高度不够，最多试 10 次
-    private func restoreScroll(to y: Double) async {
-        for _ in 0..<10 {
-            let reached = try? await webView.runIsolatedScript("""
-                const ready = document.documentElement.scrollHeight >= y + window.innerHeight * 0.5;
-                if (ready) window.scrollTo(0, y);
-                return ready;
-                """, arguments: ["y": y]) as? Bool
+    /// 回到上次看到的位置。网页内容可能还在加载、高度不够，最多试 10 次，最后一次不再等。
+    /// 版面宽度和上次不同（iPad 转了屏、调了窗口大小）时按锚点回到同一张图的同一位置，见 ReadingAnchor
+    private func restoreScroll(to y: Double, anchor: ReadingAnchor?) async {
+        let anchorJSON = anchor.flatMap { try? JSONEncoder().encode($0) }.map { String(decoding: $0, as: UTF8.self) } ?? ""
+        for attempt in 0..<10 {
+            let reached = try? await webView.runIsolatedScript(
+                ReadingAnchor.restoreScript, arguments: ["y": y, "anchor": anchorJSON, "last": attempt == 9]) as? Bool
             if reached == true { return }
             try? await Task.sleep(for: .milliseconds(500))
         }
-        _ = try? await webView.runIsolatedScript("window.scrollTo(0, y)", arguments: ["y": y])
+    }
+
+    private func readReadingAnchor() async -> ReadingAnchor? {
+        guard let json = try? await webView.runIsolatedScript(ReadingAnchor.readScript) as? String else { return nil }
+        return try? JSONDecoder().decode(ReadingAnchor.self, from: Data(json.utf8))
     }
 
     private func captureThumbnail() async -> UIImage? {

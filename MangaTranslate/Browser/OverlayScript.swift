@@ -268,6 +268,21 @@ enum OverlayScript {
           };
           document.addEventListener('scroll', onPageChange, { capture: true, passive: true });
           window.addEventListener('resize', onPageChange);
+
+          // "只翻译这一屏"的译文按文档坐标定位：版面宽度变了（iPad 转屏、调整窗口）网页会重新排版，
+          // 译文就对不上了，清掉并告诉 App。双指缩放和弹出键盘不改版面宽度，不算
+          let layoutWidth = document.documentElement.clientWidth;
+          window.addEventListener('resize', () => {
+            const width = document.documentElement.clientWidth;
+            if (Math.abs(width - layoutWidth) < 1) return;
+            layoutWidth = width;
+            const root = document.getElementById(layerId);
+            if (!root) return;
+            const stale = [...root.children].filter((el) => el.dataset.top !== undefined);
+            if (stale.length === 0) return;
+            for (const el of stale) el.remove();
+            post({ type: 'screenCleared' });
+          });
           document.addEventListener('load', (event) => {
             if (event.target instanceof HTMLImageElement) onPageChange();
           }, true);
@@ -426,12 +441,15 @@ struct Viewport: Decodable {
     var top: Double
     var width: Double
     var height: Double
+    /// 版面宽度：iPad 转屏、调整窗口时会变，双指缩放不变
+    var layoutWidth: Double
 
     static let readScript = """
         const v = window.visualViewport;
+        const layoutWidth = document.documentElement.clientWidth;
         return JSON.stringify(v
-          ? { left: v.pageLeft, top: v.pageTop, width: v.width, height: v.height }
-          : { left: window.scrollX, top: window.scrollY, width: window.innerWidth, height: window.innerHeight });
+          ? { left: v.pageLeft, top: v.pageTop, width: v.width, height: v.height, layoutWidth }
+          : { left: window.scrollX, top: window.scrollY, width: window.innerWidth, height: window.innerHeight, layoutWidth });
         """
 }
 

@@ -3,7 +3,7 @@ import SwiftUI
 enum BrowserDestination: Hashable {
     case web(URL)
     /// 从"继续看"打开，加载完后回到上次的位置
-    case resume(URL, scrollY: Double)
+    case resume(URL, scrollY: Double, anchor: ReadingAnchor?)
     case demo
 }
 
@@ -135,7 +135,7 @@ struct HomeView: View {
                 .font(.sectionTitle)
                 .foregroundStyle(Theme.ink)
             Button {
-                path.append(.resume(recent.url, scrollY: recent.scrollY))
+                path.append(.resume(recent.url, scrollY: recent.scrollY, anchor: recent.anchor))
             } label: {
                 continueCard(recent)
                     .panel(shadow: true)

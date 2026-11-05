@@ -9,6 +9,8 @@ struct RecentPage: Codable, Equatable {
     var url: URL
     /// 上次看到的位置（CSS 像素）
     var scrollY: Double
+    /// 记录时的版面宽度和屏幕顶部那张图，宽度变了时用它找回位置；旧版本存的记录没有
+    var anchor: ReadingAnchor?
     var visitedAt: Date
 }
 
@@ -23,15 +25,18 @@ final class ReadingHistory {
             .flatMap { try? JSONDecoder().decode(RecentPage.self, from: $0) }
     }
 
-    func update(title: String, url: URL, scrollY: Double? = nil) {
+    /// 不传 scrollY 时沿用同一页上次的位置和锚点
+    func update(title: String, url: URL, scrollY: Double? = nil, anchor: ReadingAnchor? = nil) {
         guard url.scheme?.hasPrefix("http") == true else { return }
         let sameURL = recent?.url == url
         let page = RecentPage(
             title: title.isEmpty ? (sameURL ? recent?.title ?? "" : "") : title,
             url: url,
             scrollY: scrollY ?? (sameURL ? recent?.scrollY ?? 0 : 0),
+            anchor: scrollY == nil ? (sameURL ? recent?.anchor : nil) : anchor,
             visitedAt: Date())
-        guard page.title != recent?.title || page.url != recent?.url || page.scrollY != recent?.scrollY else { return }
+        guard page.title != recent?.title || page.url != recent?.url || page.scrollY != recent?.scrollY
+            || page.anchor != recent?.anchor else { return }
         recent = page
         UserDefaults.standard.set(try? JSONEncoder().encode(page), forKey: Self.key)
     }
