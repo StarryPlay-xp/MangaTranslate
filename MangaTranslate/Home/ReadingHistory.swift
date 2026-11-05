@@ -36,9 +36,12 @@ final class ReadingHistory {
         UserDefaults.standard.set(try? JSONEncoder().encode(page), forKey: Self.key)
     }
 
-    func clear() {
+    /// 清除阅读记录，并删掉书架以外的封面缩略图。
+    /// 每次离开阅读页都会给那一页存封面，而记录只留最近一页，所以除了书架，别处都不再用到这些封面
+    func clear(keepingCoversFor shelf: [URL]) {
         recent = nil
         UserDefaults.standard.removeObject(forKey: Self.key)
+        ThumbnailStore.removeAll(except: shelf)
     }
 }
 
@@ -73,6 +76,16 @@ enum ThumbnailStore {
         let name = fileName(for: url)
         cache.removeObject(forKey: name as NSString)
         try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+    }
+
+    /// 删掉除这些网址以外的全部缩略图
+    static func removeAll(except kept: [URL]) {
+        let keptNames = Set(kept.map(fileName(for:)))
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        for file in files where !keptNames.contains(file.lastPathComponent) {
+            cache.removeObject(forKey: file.lastPathComponent as NSString)
+            try? FileManager.default.removeItem(at: file)
+        }
     }
 
     private static func fileName(for url: URL) -> String {

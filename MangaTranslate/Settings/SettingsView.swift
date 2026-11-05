@@ -1,24 +1,38 @@
 import MangaCore
 import SwiftUI
+import WebKit
 
 struct SettingsView: View {
     @Environment(AppSettings.self) private var settings
+    @Environment(BookmarkStore.self) private var bookmarks
+    @Environment(ReadingHistory.self) private var history
     @Environment(\.dismiss) private var dismiss
     @State private var cacheSize = TranslationCache.sizeInBytes()
     @State private var storageMessage: String?
     @State private var editing: ServiceEditorTarget?
+    @State private var confirmingHistoryClear = false
+    @State private var confirmingWebDataClear = false
+    /// 存了网页数据的网站个数；还没查完时为 nil
+    @State private var websiteCount: Int?
+    @State private var clearingWebData = false
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 26) {
-                    servicesSection
-                    translationSection
-                    storageSection
-                    aboutSection
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 26) {
+                        servicesSection
+                        translationSection
+                        storageSection
+                            .id(Self.storageAnchor)
+                        aboutSection
+                    }
+                    .padding(Theme.pageMargin)
+                    .padding(.bottom, 24)
                 }
-                .padding(Theme.pageMargin)
-                .padding(.bottom, 24)
+                #if DEBUG
+                .task { await applyDebugFocus(proxy) }
+                #endif
             }
             .background(Theme.paper)
             .navigationTitle("设置")
@@ -50,6 +64,20 @@ struct SettingsView: View {
         }
         .tint(Theme.magenta)
     }
+
+    private static let storageAnchor = "storage"
+
+    #if DEBUG
+    /// 调试用：-settingsFocus storage 滚到"存储"区块；clearHistory、clearWebData 再弹出对应的确认框
+    private func applyDebugFocus(_ proxy: ScrollViewProxy) async {
+        guard let focus = UserDefaults.standard.string(forKey: "settingsFocus") else { return }
+        try? await Task.sleep(for: .milliseconds(400))
+        proxy.scrollTo(Self.storageAnchor, anchor: .top)
+        try? await Task.sleep(for: .milliseconds(400))
+        confirmingHistoryClear = focus == "clearHistory"
+        confirmingWebDataClear = focus == "clearWebData"
+    }
+    #endif
 
     // MARK: - 模型服务
 
@@ -159,7 +187,7 @@ struct SettingsView: View {
     // MARK: - 存储
 
     private var storageSection: some View {
-        SettingsSection("存储", note: storageMessage ?? "翻译过的图片会按模型服务分别缓存译文，重看时直接显示、不再花钱；换了模型会重新翻译。术语记忆按网站保存人名等专有名词的译法，让前后译名一致。") {
+        SettingsSection("存储", note: storageMessage ?? "翻译过的图片会按模型服务分别缓存译文，重看时直接显示、不再花钱；换了模型会重新翻译。术语记忆按网站保存人名等专有名词的译法，让前后译名一致。网页数据是各网站的登录状态、Cookie 和缓存，清除后要重新登录。") {
             storageRow("译文缓存", value: ByteCountFormatter.string(fromByteCount: Int64(cacheSize), countStyle: .file)) {
                 TranslationCache.clear()
                 cacheSize = TranslationCache.sizeInBytes()
@@ -170,7 +198,53 @@ struct SettingsView: View {
                 MemoryBank.clearAll()
                 storageMessage = "已清除术语记忆，重新打开网页后生效"
             }
+            InkDivider()
+            storageRow("阅读记录", value: history.recent?.url.host() ?? "没有记录") {
+                confirmingHistoryClear = true
+            }
+            .confirmationDialog("清除阅读记录？", isPresented: $confirmingHistoryClear, titleVisibility: .visible) {
+                Button("清除阅读记录", role: .destructive) {
+                    history.clear(keepingCoversFor: bookmarks.items.map(\.url))
+                    storageMessage = "已清除阅读记录"
+                }
+            } message: {
+                Text("首页的「继续看」会清空，看过的页面里不在书架上的封面也会删掉。书架不受影响。")
+            }
+            InkDivider()
+            storageRow("网页数据", value: webDataValue, disabled: clearingWebData) {
+                confirmingWebDataClear = true
+            }
+            .confirmationDialog("清除网页数据？", isPresented: $confirmingWebDataClear, titleVisibility: .visible) {
+                Button("清除网页数据", role: .destructive) {
+                    Task { await clearWebData() }
+                }
+            } message: {
+                Text("会删掉所有网站的 Cookie、缓存和本地存储：登录过的漫画网站都要重新登录，网站里的偏好设置也会恢复默认。书架、阅读记录和译文缓存不受影响。")
+            }
         }
+        .task { await countWebsites() }
+    }
+
+    private var webDataValue: String? {
+        if clearingWebData { return "正在清除…" }
+        return websiteCount.map { $0 == 0 ? "没有数据" : "\($0) 个网站" }
+    }
+
+    private func countWebsites() async {
+        let records = await WKWebsiteDataStore.default().dataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes())
+        websiteCount = records.count
+    }
+
+    /// 阅读页的 WKWebView 用的是默认数据存储，清掉它就是清掉网站的 Cookie、缓存和本地存储；
+    /// App 自己下载漫画图片时的 HTTP 缓存在 URLCache.shared，也一起清掉
+    private func clearWebData() async {
+        clearingWebData = true
+        await WKWebsiteDataStore.default().removeData(
+            ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
+        URLCache.shared.removeAllCachedResponses()
+        await countWebsites()
+        clearingWebData = false
+        storageMessage = "已清除网页数据，网站需要重新登录；正在看的网页刷新后生效"
     }
 
     // MARK: - 关于
@@ -191,7 +265,9 @@ struct SettingsView: View {
 
     // MARK: - 组件
 
-    private func storageRow(_ title: String, value: String?, clear: @escaping () -> Void) -> some View {
+    private func storageRow(
+        _ title: String, value: String?, disabled: Bool = false, clear: @escaping () -> Void
+    ) -> some View {
         HStack(spacing: 10) {
             Text(title)
                 .font(.system(size: 16, weight: .heavy))
@@ -204,6 +280,8 @@ struct SettingsView: View {
             Spacer()
             Button("清除", action: clear)
                 .buttonStyle(InkButtonStyle())
+                .disabled(disabled)
+                .opacity(disabled ? 0.45 : 1)
         }
         .padding(14)
     }

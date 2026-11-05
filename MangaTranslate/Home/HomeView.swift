@@ -158,7 +158,9 @@ struct HomeView: View {
             }
             .buttonStyle(PanelButtonStyle())
             .contextMenu {
-                Button("从继续看里移除", systemImage: "xmark", role: .destructive) { history.clear() }
+                Button("从继续看里移除", systemImage: "xmark", role: .destructive) {
+                    history.clear(keepingCoversFor: bookmarks.items.map(\.url))
+                }
             }
         }
     }
