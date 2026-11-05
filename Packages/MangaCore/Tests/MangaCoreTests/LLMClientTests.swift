@@ -329,6 +329,11 @@ private final class ScriptedClient: LLMClient, @unchecked Sendable {
     }
 }
 
+private actor UsageCollector {
+    private(set) var items: [LLMUsage] = []
+    func add(_ usage: LLMUsage) { items.append(usage) }
+}
+
 struct PageTranslatorTests {
     private let blocks = [1, 2].map { id in
         TextBlock(
@@ -354,11 +359,14 @@ struct PageTranslatorTests {
             .success(LLMReply(content: "这不是 json", usage: LLMUsage(inputTokens: 10, outputTokens: 1))),
             .success(LLMReply(content: good, usage: LLMUsage(inputTokens: 10, outputTokens: 2))),
         ])
+        let reported = UsageCollector()
         let result = try await PageTranslator()
-            .translate(blocks: blocks, prompt: "p", markedImage: Data(), using: client)
+            .translate(blocks: blocks, prompt: "p", markedImage: Data(), using: client, onUsage: { await reported.add($0) })
         #expect(result.attempts == 2)
         #expect(result.usage == LLMUsage(inputTokens: 20, outputTokens: 3))
         #expect(result.blocks[1].translation == "t")
+        // 解析失败的那次也花了钱，记账回调要收到两次
+        #expect(await reported.items == [LLMUsage(inputTokens: 10, outputTokens: 1), LLMUsage(inputTokens: 10, outputTokens: 2)])
     }
 
     @Test func 不可重试的错误直接抛出() async {

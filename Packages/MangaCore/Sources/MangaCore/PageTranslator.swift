@@ -129,9 +129,11 @@ public struct PageTranslator: Sendable {
             omitsImageData: omitImage)
     }
 
-    /// 发送请求并解析 json；网络错误、限流、空白或不合法的返回最多重试 3 次
+    /// 发送请求并解析 json；网络错误、限流、空白或不合法的返回最多重试 3 次。
+    /// onUsage 在每次收到带用量的回复后调用，包括之后解析失败、要重试的那几次，用来记账
     public func translate(
-        blocks: [TextBlock], prompt: String, markedImage: Data, using client: any LLMClient
+        blocks: [TextBlock], prompt: String, markedImage: Data, using client: any LLMClient,
+        onUsage: (@Sendable (LLMUsage) async -> Void)? = nil
     ) async throws -> PageTranslation {
         let request = makePrompt(prompt: prompt, markedImage: markedImage)
         var usage = LLMUsage.zero
@@ -139,7 +141,10 @@ public struct PageTranslator: Sendable {
         for attempt in 1...3 {
             do {
                 let reply = try await client.complete(request)
-                if let replyUsage = reply.usage { usage = usage.adding(replyUsage) }
+                if let replyUsage = reply.usage {
+                    usage = usage.adding(replyUsage)
+                    await onUsage?(replyUsage)
+                }
                 let output = try TranslationOutput.parse(reply.content)
                 return PageTranslation(
                     blocks: Self.merge(blocks, with: output), newTerms: output.newTerms ?? [],

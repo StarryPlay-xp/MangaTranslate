@@ -4,6 +4,7 @@ import SwiftUI
 /// 新增或编辑一个模型服务。改动点右上角"保存"后才生效，粘贴的 Key 也是那时才写进钥匙串
 struct ServiceEditorView: View {
     @Environment(AppSettings.self) private var settings
+    @Environment(UsageLedger.self) private var usage
     @Environment(\.dismiss) private var dismiss
     let isNew: Bool
     @State private var draft: ModelService
@@ -351,6 +352,7 @@ struct ServiceEditorView: View {
             do {
                 let reply = try await config.makeClient(apiKey: key).ping()
                 let seconds = (ContinuousClock.now - started) / .seconds(1)
+                if let replyUsage = reply.usage { usage.record(replyUsage, config: config) }
                 test = .succeeded(Self.describe(reply, seconds: seconds, pricing: config.pricing))
             } catch {
                 test = .failed(error.localizedDescription)

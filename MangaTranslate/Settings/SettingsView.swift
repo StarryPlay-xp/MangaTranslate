@@ -6,12 +6,14 @@ struct SettingsView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(BookmarkStore.self) private var bookmarks
     @Environment(ReadingHistory.self) private var history
+    @Environment(UsageLedger.self) private var usage
     @Environment(\.dismiss) private var dismiss
     @State private var cacheSize = TranslationCache.sizeInBytes()
     @State private var storageMessage: String?
     @State private var editing: ServiceEditorTarget?
     @State private var confirmingHistoryClear = false
     @State private var confirmingWebDataClear = false
+    @State private var confirmingUsageClear = false
     /// 存了网页数据的网站个数；还没查完时为 nil
     @State private var websiteCount: Int?
     @State private var clearingWebData = false
@@ -22,6 +24,10 @@ struct SettingsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 26) {
                         servicesSection
+                        if showsUsage {
+                            usageSection
+                                .id(Self.usageAnchor)
+                        }
                         translationSection
                         storageSection
                             .id(Self.storageAnchor)
@@ -66,16 +72,20 @@ struct SettingsView: View {
     }
 
     private static let storageAnchor = "storage"
+    private static let usageAnchor = "usage"
 
     #if DEBUG
-    /// 调试用：-settingsFocus storage 滚到"存储"区块；clearHistory、clearWebData 再弹出对应的确认框
+    /// 调试用：-settingsFocus storage 滚到"存储"区块；clearHistory、clearWebData 再弹出对应的确认框。
+    /// usage 滚到"DeepSeek 用量"区块，clearUsage 再弹出清除用量的确认框
     private func applyDebugFocus(_ proxy: ScrollViewProxy) async {
         guard let focus = UserDefaults.standard.string(forKey: "settingsFocus") else { return }
         try? await Task.sleep(for: .milliseconds(400))
-        proxy.scrollTo(Self.storageAnchor, anchor: .top)
+        let usageFocus = focus == "usage" || focus == "clearUsage"
+        proxy.scrollTo(usageFocus ? Self.usageAnchor : Self.storageAnchor, anchor: .top)
         try? await Task.sleep(for: .milliseconds(400))
         confirmingHistoryClear = focus == "clearHistory"
         confirmingWebDataClear = focus == "clearWebData"
+        confirmingUsageClear = focus == "clearUsage"
     }
     #endif
 
@@ -157,6 +167,103 @@ struct SettingsView: View {
                 .buttonStyle(InkButtonStyle())
         }
         .padding(14)
+    }
+
+    // MARK: - DeepSeek 用量
+
+    /// 保存了 DeepSeek 服务、或者已经有记录时才显示
+    private var showsUsage: Bool {
+        settings.services.contains { $0.config.pricing != nil } || !usage.allTime.isEmpty
+    }
+
+    private var usageSection: some View {
+        let lastMonth = usage.lastMonth
+        let allTime = usage.allTime
+        return SettingsSection(
+            "DeepSeek 用量",
+            note: "按 deepseek-flash 官方价估算，以美元计。工作日北京时间 9–12 点和 14–18 点是高峰时段，单价翻倍，每次调用按当时的单价计。只统计这台设备发出的调用，实际扣费以 DeepSeek 后台账单为准；重看翻译过的图片走缓存，不花钱。"
+        ) {
+            HStack(spacing: 0) {
+                usageCell("今天", total: usage.today)
+                Rectangle().fill(Theme.ink).frame(width: Theme.thinLine)
+                usageCell("本月", total: usage.thisMonth)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            InkDivider()
+            if !lastMonth.isEmpty {
+                usageSummaryRow("上月", total: lastMonth, detail: "调用 \(lastMonth.requests) 次")
+                InkDivider()
+            }
+            usageSummaryRow("累计", total: allTime, detail: allTimeDetail(allTime))
+            InkDivider()
+            storageRow("用量记录", value: allTime.isEmpty ? "没有记录" : nil, disabled: allTime.isEmpty) {
+                confirmingUsageClear = true
+            }
+            .confirmationDialog("清除用量记录？", isPresented: $confirmingUsageClear, titleVisibility: .visible) {
+                Button("清除用量记录", role: .destructive) { usage.clear() }
+            } message: {
+                Text("今天、本月和累计的用量都从零开始重新统计。只清除这台设备上的统计，不影响 DeepSeek 账户和账单。")
+            }
+        }
+    }
+
+    /// 今天、本月：上面小标题，中间费用，下面调用次数
+    private func usageCell(_ title: String, total: UsageTotal) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: 13, weight: .heavy))
+                .foregroundStyle(Theme.muted)
+            Text(UsageFormat.usd(total.costUSD))
+                .font(.system(size: 26, weight: .black))
+                .monospacedDigit()
+                .foregroundStyle(Theme.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Text(total.isEmpty ? "还没有调用" : "调用 \(total.requests) 次")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.muted)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// 上月、累计：左边标题，右边费用，下面一行说明
+    private func usageSummaryRow(_ title: String, total: UsageTotal, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 12) {
+                Text(title)
+                    .font(.system(size: 16, weight: .heavy))
+                    .foregroundStyle(Theme.ink)
+                Spacer()
+                Text(UsageFormat.usd(total.costUSD))
+                    .font(.system(size: 17, weight: .heavy))
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.ink)
+            }
+            Text(detail)
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func allTimeDetail(_ total: UsageTotal) -> String {
+        guard !total.isEmpty else { return "还没有调用。用 DeepSeek 翻译后，这里会显示花了多少钱。" }
+        var lines: [String] = []
+        if let startedAt = usage.book.startedAt {
+            let date = startedAt.formatted(.dateTime.year().month().day().locale(Locale(identifier: "zh-Hans")))
+            lines.append("\(date)起，调用 \(total.requests) 次，平均每次 \(UsageFormat.usd(total.averageCostUSD))")
+        }
+        var input = "输入 \(UsageFormat.tokens(total.inputTokens)) token"
+        if total.cachedInputTokens > 0 {
+            input += "，其中缓存命中 \(UsageFormat.tokens(total.cachedInputTokens))"
+        }
+        lines.append(input)
+        lines.append("输出 \(UsageFormat.tokens(total.outputTokens)) token")
+        return lines.joined(separator: "\n")
     }
 
     // MARK: - 翻译

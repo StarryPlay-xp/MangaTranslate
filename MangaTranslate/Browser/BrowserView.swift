@@ -6,6 +6,7 @@ struct BrowserView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(BookmarkStore.self) private var bookmarks
     @Environment(ReadingHistory.self) private var history
+    @Environment(UsageLedger.self) private var usage
     @Environment(\.dismiss) private var dismiss
     @State private var model = BrowserModel()
     @State private var showingSettings = false
@@ -41,7 +42,7 @@ struct BrowserView: View {
             .sensoryFeedback(.selection, trigger: settings.autoTranslate)
             .sheet(isPresented: $showingSettings) { SettingsView() }
             .onAppear {
-                model.attach(settings: settings, history: history, bookmarks: bookmarks)
+                model.attach(settings: settings, history: history, bookmarks: bookmarks, usage: usage)
                 model.load(destination)
             }
             .onDisappear {

@@ -36,6 +36,8 @@ final class AutoTranslator {
     private(set) var pendingCount = 0
 
     @ObservationIgnored var settings: AppSettings?
+    /// 有价格的模型（deepseek-flash）每次调用后在这里记账
+    @ObservationIgnored weak var usage: UsageLedger?
     /// 单张图失败时的提示
     @ObservationIgnored var onError: ((String) -> Void)?
     /// 缺少 Key、Key 无效、余额不足、地址或模型不对、连不上服务时调用：自动翻译已经停下，需要用户处理。
@@ -190,8 +192,11 @@ final class AutoTranslator {
                     let prompt = translator.userPrompt(
                         blocks: segment.blocks, languageName: language.displayName,
                         readingOrder: language.readingOrder, memory: memoryBank.memory(for: host))
+                    let ledger = usage
+                    let config = service.config
                     let result = try await translator.translate(
-                        blocks: segment.blocks, prompt: prompt, markedImage: segment.markedJPEG, using: client)
+                        blocks: segment.blocks, prompt: prompt, markedImage: segment.markedJPEG, using: client,
+                        onUsage: { await ledger?.record($0, config: config) })
                     memoryBank.record(result, host: host)
                     blocks = result.blocks
                 } else {

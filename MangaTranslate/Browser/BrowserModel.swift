@@ -42,6 +42,7 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
     @ObservationIgnored private weak var settings: AppSettings?
     @ObservationIgnored private weak var history: ReadingHistory?
     @ObservationIgnored private weak var bookmarks: BookmarkStore?
+    @ObservationIgnored private weak var usage: UsageLedger?
     @ObservationIgnored private let memoryBank: MemoryBank
     @ObservationIgnored private let messageProxy: ScriptMessageProxy
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
@@ -117,11 +118,13 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
         ]
     }
 
-    func attach(settings: AppSettings, history: ReadingHistory, bookmarks: BookmarkStore) {
+    func attach(settings: AppSettings, history: ReadingHistory, bookmarks: BookmarkStore, usage: UsageLedger) {
         self.settings = settings
         self.history = history
         self.bookmarks = bookmarks
+        self.usage = usage
         autoTranslator.settings = settings
+        autoTranslator.usage = usage
         autoTranslator.setEnabled(settings.autoTranslate)
     }
 
@@ -284,8 +287,11 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
                 let prompt = translator.userPrompt(
                     blocks: page.blocks, languageName: settings.sourceLanguage.displayName,
                     readingOrder: settings.sourceLanguage.readingOrder, memory: memoryBank.memory(for: host))
+                let ledger = usage
+                let config = service.config
                 let result = try await translator.translate(
-                    blocks: page.blocks, prompt: prompt, markedImage: page.markedJPEG, using: client)
+                    blocks: page.blocks, prompt: prompt, markedImage: page.markedJPEG, using: client,
+                    onUsage: { await ledger?.record($0, config: config) })
                 memoryBank.record(result, host: host)
                 translated = result.blocks
             }
