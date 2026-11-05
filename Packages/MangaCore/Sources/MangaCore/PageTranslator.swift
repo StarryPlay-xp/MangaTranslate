@@ -96,7 +96,8 @@ public struct TranslationMemory: Codable, Sendable {
     }
 }
 
-/// 模型回复的写法。App 现在用 full；另外两种更短、生成更快，正在用 OCRProbe 对比速度和质量
+/// 模型回复的写法。App 现在用 full；其余几种更短、生成更快，正在用 OCRProbe 对比速度和质量。
+/// 第一轮对比（42 页）：不抄原文的 nosource、compact 快 18%～26%，但人名、短句错得明显更多，不采用
 public enum ReplyFormat: String, CaseIterable, Sendable {
     /// 每块写出编号、核对后的原文、译文和类型
     case full
@@ -104,6 +105,8 @@ public enum ReplyFormat: String, CaseIterable, Sendable {
     case noSource = "nosource"
     /// 每块写成 [编号, 类型, 译文] 数组，也不抄写原文
     case compact
+    /// 每块写成 [编号, 核对后的原文, 译文, 类型] 数组：照样先抄原文，只省掉键名，顺序和 full 一样
+    case compactWithSource = "compact-source"
 }
 
 /// 组织提示词、调用模型并解析一页的翻译结果
@@ -162,6 +165,14 @@ public struct PageTranslator: Sendable {
                 只输出 json，不要输出任何解释，也不要抄写原文。每个编号都要出现且只出现一次。格式如下：
                 {"blocks": [[1, "dialogue", "中文译文"], [2, "noise", ""]], "new_terms": [["原文专有名词", "中文译名"]]}
                 blocks 里每一项依次是编号、kind、translation；new_terms 里每一项依次是原文和译名，没有就写 []。
+                \(kindList)
+                """
+        case .compactWithSource:
+            emptyRule = "7. 框里其实没有文字时，kind 填 \"noise\"，source 和 translation 都留空。"
+            reply = """
+                只输出 json，不要输出任何解释。每个编号都要出现且只出现一次。格式如下：
+                {"blocks": [[1, "核对后的原文", "中文译文", "dialogue"], [2, "", "", "noise"]], "new_terms": [["原文专有名词", "中文译名"]]}
+                blocks 里每一项依次是编号、source（核对后的原文）、translation、kind；new_terms 里每一项依次是原文和译名，没有就写 []。
                 \(kindList)
                 """
         }
@@ -254,8 +265,9 @@ struct TranslationOutput: Decodable {
         // 模型偶尔会把 id 写成字符串，或者省略空字段，这里都兼容
         init(from decoder: Decoder) throws {
             guard let container = try? decoder.container(keyedBy: CodingKeys.self) else {
-                // 精简写法：[编号, kind, 译文]
+                // 精简写法：[编号, kind, 译文]，或带原文的 [编号, 原文, 译文, kind]
                 var array = try decoder.unkeyedContainer()
+                let withSource = array.count == 4
                 if let number = try? array.decode(Int.self) {
                     id = number
                 } else if let text = try? array.decode(String.self), let number = Int(text) {
@@ -263,9 +275,15 @@ struct TranslationOutput: Decodable {
                 } else {
                     throw DecodingError.dataCorruptedError(in: array, debugDescription: "id 不是数字")
                 }
-                source = ""
-                kind = (try? array.decode(String.self)) ?? "dialogue"
-                translation = (try? array.decode(String.self)) ?? ""
+                if withSource {
+                    source = (try? array.decode(String.self)) ?? ""
+                    translation = (try? array.decode(String.self)) ?? ""
+                    kind = (try? array.decode(String.self)) ?? "dialogue"
+                } else {
+                    source = ""
+                    kind = (try? array.decode(String.self)) ?? "dialogue"
+                    translation = (try? array.decode(String.self)) ?? ""
+                }
                 return
             }
             if let number = try? container.decode(Int.self, forKey: .id) {

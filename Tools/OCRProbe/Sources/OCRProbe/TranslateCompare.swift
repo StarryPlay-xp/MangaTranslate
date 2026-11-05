@@ -112,6 +112,7 @@ private func makeComparison(_ runs: [TranslateRun]) -> ReplyComparison {
 
 private let formatNames = [
     "full": "full（现在的写法）", "nosource": "nosource（不抄原文）", "compact": "compact（数组写法）",
+    "compact-source": "compact-source（数组写法，照样抄原文）",
 ]
 private let kindNames = [
     "dialogue": "对白", "narration": "旁白", "sfx": "拟声词", "title": "标题大字", "noise": "非剧情", "missing": "模型漏掉",

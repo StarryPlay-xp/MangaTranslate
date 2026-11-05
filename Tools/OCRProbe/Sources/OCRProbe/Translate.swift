@@ -15,7 +15,7 @@ struct TranslateOptions {
     /// 模型回复的写法；写多个时每页轮流用各种写法各翻一次，生成对比报告
     var replyFormats: [ReplyFormat] = [.full]
 
-    static let usage = "用法：ocrprobe translate <样本目录> <识别结果目录> <输出目录> [--limit 3] [--text-only] [--thinking] [--dry-run] [--reply-format full|nosource|compact，逗号分隔可写多个] \(ServiceOptions.usage)"
+    static let usage = "用法：ocrprobe translate <样本目录> <识别结果目录> <输出目录> [--limit 3] [--text-only] [--thinking] [--dry-run] [--reply-format full|nosource|compact|compact-source，逗号分隔可写多个] \(ServiceOptions.usage)"
 
     init(parsing args: [String]) throws {
         var positional: [String] = []
@@ -34,7 +34,7 @@ struct TranslateOptions {
                 let names = (iterator.next() ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
                 let formats = names.compactMap(ReplyFormat.init(rawValue:))
                 guard !formats.isEmpty, formats.count == names.count else {
-                    throw ProbeError("--reply-format 只能是 full、nosource、compact，可以用逗号写多个，例如 full,nosource,compact")
+                    throw ProbeError("--reply-format 只能是 full、nosource、compact、compact-source，可以用逗号写多个，例如 full,compact-source")
                 }
                 replyFormats = formats.reduce(into: []) { if !$0.contains($1) { $0.append($1) } }
             default: positional.append(arg)

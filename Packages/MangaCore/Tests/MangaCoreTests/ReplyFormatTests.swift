@@ -17,6 +17,20 @@ struct ReplyFormatTests {
             #expect(prompt.contains("json"))
         }
         #expect(PageTranslator.systemPrompt(for: .compact).contains(#"[1, "dialogue", "中文译文"]"#))
+        // 带原文的数组写法照样要求核对原文
+        let withSource = PageTranslator.systemPrompt(for: .compactWithSource)
+        #expect(withSource.hasPrefix(sharedPrefix))
+        #expect(withSource.contains(#"[1, "核对后的原文", "中文译文", "dialogue"]"#))
+        #expect(withSource.contains("source 和 translation 都留空"))
+    }
+
+    @Test func parsesCompactArraysWithSource() throws {
+        let content = #"{"blocks": [[1, "行くぞ", "走吧", "dialogue"], [2, "", "", "noise"]], "new_terms": []}"#
+        let output = try TranslationOutput.parse(content)
+        #expect(output.blocks.map(\.id) == [1, 2])
+        #expect(output.blocks.map(\.source) == ["行くぞ", ""])
+        #expect(output.blocks.map(\.translation) == ["走吧", ""])
+        #expect(output.blocks.map(\.kind) == ["dialogue", "noise"])
     }
 
     @Test func parsesCompactArrays() throws {

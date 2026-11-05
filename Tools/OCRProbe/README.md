@@ -71,7 +71,7 @@ open output/translate/report.html
 - `--text-only`：只发文字不发图片，用来对比有图和没图的翻译效果
 - `--thinking`：开启 DeepSeek 的思考模式，更慢也更贵，用来对比难页的效果（只对 DeepSeek 生效）
 - `--dry-run`：试运行，不联网也不需要 Key，在 `requests/` 里生成每页要发送的请求内容（图片内容省略），方便核对
-- `--reply-format full|nosource|compact`：模型回复的写法，默认 `full`（App 现在用的）。`nosource` 不再抄写原文；`compact` 每块写成 `[编号, 类型, 译文]` 数组，也不抄原文。后两种回复更短、生成更快，可能影响翻译质量
+- `--reply-format full|nosource|compact|compact-source`：模型回复的写法，默认 `full`（App 现在用的）。`nosource` 不再抄写原文；`compact` 每块写成 `[编号, 类型, 译文]` 数组，也不抄原文；`compact-source` 每块写成 `[编号, 核对后的原文, 译文, 类型]` 数组，照样先抄原文、只省掉键名。后几种回复更短、生成更快，可能影响翻译质量。第一轮对比里，不抄原文的两种人名、短句错得明显更多
 
 ### 对比回复写法
 
