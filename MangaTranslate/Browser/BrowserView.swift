@@ -10,6 +10,7 @@ struct BrowserView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var model = BrowserModel()
     @State private var showingSettings = false
+    @State private var editingAddress = false
 
     var body: some View {
         WebView(webView: model.webView)
@@ -17,7 +18,7 @@ struct BrowserView: View {
             .background(Theme.paper)
             .overlay(alignment: .top) {
                 topBar
-                    .offset(y: model.chromeHidden ? -120 : 0)
+                    .offset(y: model.chromeHidden && !editingAddress ? -120 : 0)
             }
             .overlay(alignment: .bottom) {
                 VStack(spacing: 12) {
@@ -60,8 +61,15 @@ struct BrowserView: View {
             }
             #if DEBUG
             .onChange(of: model.finishedLoads) { _, count in
+                guard count == 1 else { return }
+                // 调试用：-editAddress 加载完进入地址栏编辑；-addressInput <文字> 模拟在地址栏里输入后前往
+                if ProcessInfo.processInfo.arguments.contains("-editAddress") { editingAddress = true }
+                if let input = UserDefaults.standard.string(forKey: "addressInput"),
+                   let url = URL.addressBarDestination(input) {
+                    model.open(url)
+                }
                 // 调试用：启动参数带 -translateScreen 时，页面加载完执行一次"只翻译这一屏"
-                guard count == 1, ProcessInfo.processInfo.arguments.contains("-translateScreen") else { return }
+                guard ProcessInfo.processInfo.arguments.contains("-translateScreen") else { return }
                 Task {
                     try? await Task.sleep(for: .seconds(1))
                     await model.translateVisibleArea(settings: settings)
@@ -70,25 +78,26 @@ struct BrowserView: View {
             #endif
     }
 
-    // MARK: - 顶栏：返回书架、标题、加入书架
+    // MARK: - 顶栏：返回书架、地址栏、加入书架；编辑网址时只留地址栏
 
     private var topBar: some View {
         HStack(spacing: 4) {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 17, weight: .heavy))
-                    .frame(width: 44, height: 44)
+            if !editingAddress {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 17, weight: .heavy))
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("返回书架")
             }
-            .accessibilityLabel("返回书架")
 
-            Text(model.title.isEmpty ? "加载中…" : model.title)
-                .font(.system(size: 15, weight: .heavy))
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            AddressBar(
+                title: model.title, url: model.currentURL, isLoading: model.isLoading,
+                isEditing: $editingAddress, onOpen: model.open)
 
-            if model.canBookmark, let url = model.currentURL {
+            if !editingAddress, model.canBookmark, let url = model.currentURL {
                 let saved = bookmarks.contains(url)
                 Button {
                     Task { await model.toggleBookmark() }

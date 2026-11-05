@@ -12,7 +12,6 @@ struct HomeView: View {
     @Environment(ReadingHistory.self) private var history
     @State private var path: [BrowserDestination] = []
     @State private var address = ""
-    @State private var addressError: String?
     @State private var showingSettings = false
 
     var body: some View {
@@ -92,43 +91,34 @@ struct HomeView: View {
 
     private var addressBubble: some View {
         let bubble = SpeechBubble(cornerRadius: 26, tailHeight: 11, tailWidth: 16, tailPosition: 0.84, tailLean: 0.7)
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                TextField("输入漫画网址", text: $address)
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(Theme.ink)
-                    .keyboardType(.URL)
-                    .textContentType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .submitLabel(.go)
-                    .onSubmit(openAddress)
-                Button(action: openAddress) {
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 16, weight: .black))
-                        .foregroundStyle(.white)
-                        .frame(width: 38, height: 38)
-                        .background(Circle().fill(Theme.magenta))
-                        .overlay(Circle().strokeBorder(Theme.ink, lineWidth: 2))
-                }
-                .disabled(address.trimmingCharacters(in: .whitespaces).isEmpty)
-                .opacity(address.trimmingCharacters(in: .whitespaces).isEmpty ? 0.45 : 1)
-                .accessibilityLabel("打开网址")
+        return HStack(spacing: 8) {
+            TextField("输入网址或搜索漫画", text: $address)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(Theme.ink)
+                .keyboardType(.webSearch)
+                .textContentType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.go)
+                .onSubmit(openAddress)
+            Button(action: openAddress) {
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 16, weight: .black))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(Circle().fill(Theme.magenta))
+                    .overlay(Circle().strokeBorder(Theme.ink, lineWidth: 2))
             }
-            .padding(.leading, 20)
-            .padding(.trailing, 7)
-            .padding(.top, 7)
-            .padding(.bottom, 7 + 11)
-            .background(bubble.fill(Theme.paper))
-            .overlay(bubble.stroke(Theme.ink, style: StrokeStyle(lineWidth: Theme.line, lineJoin: .round)))
-
-            if let addressError {
-                Text(addressError)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.magenta)
-                    .padding(.leading, 20)
-            }
+            .disabled(address.trimmingCharacters(in: .whitespaces).isEmpty)
+            .opacity(address.trimmingCharacters(in: .whitespaces).isEmpty ? 0.45 : 1)
+            .accessibilityLabel("打开网址")
         }
+        .padding(.leading, 20)
+        .padding(.trailing, 7)
+        .padding(.top, 7)
+        .padding(.bottom, 7 + 11)
+        .background(bubble.fill(Theme.paper))
+        .overlay(bubble.stroke(Theme.ink, style: StrokeStyle(lineWidth: Theme.line, lineJoin: .round)))
     }
 
     // MARK: - 继续看
@@ -250,12 +240,9 @@ struct HomeView: View {
         .buttonStyle(PanelButtonStyle())
     }
 
+    /// 像网址就打开，不像网址就用 Google 搜索
     private func openAddress() {
-        guard let url = URL(userInput: address) else {
-            addressError = "这不是有效的网址，例如 comic.naver.com"
-            return
-        }
-        addressError = nil
+        guard let url = URL.addressBarDestination(address) else { return }
         path.append(.web(url))
     }
 
@@ -283,20 +270,4 @@ struct HomeView: View {
         }
     }
     #endif
-}
-
-extension URL {
-    /// 把用户输入补全成网址，没写协议时默认 https；只接受 http 和 https
-    init?(userInput: String) {
-        let text = userInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !text.contains(" ") else { return nil }
-        let withScheme = text.contains("://") ? text : "https://" + text
-        guard let url = URL(string: withScheme),
-              let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
-              let host = url.host(), host.contains(".")
-        else {
-            return nil
-        }
-        self = url
-    }
 }

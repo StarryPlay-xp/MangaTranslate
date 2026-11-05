@@ -29,6 +29,7 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
     private(set) var currentURL: URL?
     private(set) var canGoBack = false
     private(set) var canGoForward = false
+    private(set) var isLoading = false
     /// 往下滑或左右翻页时收起上下工具栏，往上滑、回到顶部或点屏幕中间时再出现
     private(set) var chromeHidden = false
     private(set) var message: BrowserMessage?
@@ -112,6 +113,9 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
             webView.observe(\.canGoForward) { [weak self] webView, _ in
                 MainActor.assumeIsolated { self?.canGoForward = webView.canGoForward }
             },
+            webView.observe(\.isLoading) { [weak self] webView, _ in
+                MainActor.assumeIsolated { self?.isLoading = webView.isLoading }
+            },
             webView.scrollView.observe(\.contentOffset) { [weak self] scrollView, _ in
                 MainActor.assumeIsolated { self?.didScroll(scrollView) }
             },
@@ -152,6 +156,11 @@ final class BrowserModel: NSObject, WKNavigationDelegate, WKUIDelegate {
             #endif
             webView.loadFileURL(page, allowingReadAccessTo: folder)
         }
+    }
+
+    /// 在地址栏里输入网址或搜索后打开
+    func open(_ url: URL) {
+        webView.load(URLRequest(url: url))
     }
 
     var canBookmark: Bool { currentURL?.scheme?.hasPrefix("http") == true }
