@@ -3,7 +3,8 @@ import Foundation
 import MangaCore
 
 /// 注入网页的脚本，运行在独立的 content world 里，网页自己的脚本看不到也改不了这些函数。
-/// - 按图片翻译（自动模式）：找出屏幕附近的漫画图片报给 App，再把译文按比例贴在图片上，跟着图片移动和缩放
+/// - 按图片翻译（自动模式）：找出屏幕附近的漫画图片报给 App，再把译文按比例贴在图片上，跟着图片移动和缩放。
+///   画在 canvas 上的页面（比如マガポケ）等它完整停在屏幕上再报，由 App 截取那块区域
 /// - 按屏幕翻译："只翻译这一屏"的结果按文档坐标绝对定位
 enum OverlayScript {
     static let messageHandlerName = "mangaTranslate"
@@ -81,9 +82,25 @@ enum OverlayScript {
             } catch (error) {}
           };
 
-          const imageById = (id) => document.querySelector(`img[data-mt-id="${CSS.escape(id)}"]`);
+          // 图片或 canvas
+          const elementById = (id) => document.querySelector(`[data-mt-id="${CSS.escape(id)}"]`);
 
-          // 找出屏幕上和下方 1.5 屏以内、已经加载好的大图，按离屏幕的远近报给 App
+          // 屏幕上实际看到的区域（放大后只是页面的一部分），坐标和 getBoundingClientRect 一致
+          const visibleArea = () => {
+            const v = window.visualViewport;
+            return v
+              ? { left: v.offsetLeft, top: v.offsetTop, width: v.width, height: v.height }
+              : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+          };
+          const fullyVisible = (rect, area) =>
+            rect.left >= area.left - 2 && rect.top >= area.top - 2 &&
+            rect.right <= area.left + area.width + 2 && rect.bottom <= area.top + area.height + 2;
+          const rectKey = (rect) => [rect.left, rect.top, rect.width, rect.height].map(Math.round).join(',');
+          // canvas 编号 → 上次看到的位置和从什么时候起没再动过
+          const canvasMoves = new Map();
+
+          // 找出屏幕上和下方 1.5 屏以内、已经加载好的大图，按离屏幕的远近报给 App；
+          // canvas 只在完整停在屏幕上 0.4 秒后才报，还在动（翻页动画）就过一会儿再看
           const scan = () => {
             scanTimer = null;
             if (!autoEnabled) return;
@@ -95,16 +112,41 @@ enum OverlayScript {
               if (!img.complete || img.naturalWidth < 300 || img.naturalHeight < 200) continue;
               const rect = img.getBoundingClientRect();
               if (rect.width < viewWidth * 0.5 || rect.height < 100) continue;
+              // 又矮、原图又小的多半是封面或横幅
+              if (rect.height < 200 && img.naturalWidth < 600) continue;
               if (rect.bottom < 0) continue;
+              // 左右翻页的阅读器把各页横着排开，完全在屏幕左右两侧外面的（别的页、广告页）翻到了再说
+              if (rect.right <= 0 || rect.left >= viewWidth) continue;
               const distance = Math.max(0, rect.top - viewHeight);
               if (distance > viewHeight * 1.5) continue;
               if (!img.dataset.mtId) img.dataset.mtId = String(++nextId);
               items.push({ id: img.dataset.mtId, src: img.currentSrc || img.src, distance });
             }
+
+            const now = performance.now();
+            const area = visibleArea();
+            let moving = false;
+            for (const canvas of document.querySelectorAll('canvas')) {
+              if (canvas.dataset.mtState || canvas.width < 300 || canvas.height < 200) continue;
+              const rect = canvas.getBoundingClientRect();
+              if (rect.width < viewWidth * 0.5 || rect.height < 200) continue;
+              if (!canvas.dataset.mtId) canvas.dataset.mtId = String(++nextId);
+              const id = canvas.dataset.mtId;
+              const key = rectKey(rect);
+              const seen = canvasMoves.get(id);
+              if (!seen || seen.key !== key) {
+                canvasMoves.set(id, { key, since: now });
+                moving = true;
+              } else if (fullyVisible(rect, area)) {
+                if (now - seen.since >= 400) items.push({ id, src: '', distance: 0, kind: 'canvas' });
+                else moving = true;
+              }
+            }
             post({ type: 'candidates', items });
+            if (moving) scheduleScan(450);
           };
-          const scheduleScan = () => {
-            if (autoEnabled && !scanTimer) scanTimer = setTimeout(scan, 250);
+          const scheduleScan = (delay = 250) => {
+            if (autoEnabled && !scanTimer) scanTimer = setTimeout(scan, delay);
           };
 
           // 让译文层对齐图片当前的位置和大小；图片宽度变了就重新排字号
@@ -116,6 +158,10 @@ enum OverlayScript {
             }
             const rect = entry.img.getBoundingClientRect();
             const style = entry.box.style;
+            // 完全在页面左右两侧外面的（左右翻页时别的页）先藏起来，免得把网页撑宽
+            const offscreen = rect.right <= 0 || rect.left >= document.documentElement.clientWidth;
+            style.display = offscreen ? 'none' : '';
+            if (offscreen) return;
             style.left = (rect.left + window.scrollX) + 'px';
             style.top = (rect.top + window.scrollY) + 'px';
             style.width = rect.width + 'px';
@@ -138,7 +184,7 @@ enum OverlayScript {
           };
 
           const entryFor = (id) => {
-            const img = imageById(id);
+            const img = elementById(id);
             if (!img) return null;
             let entry = images.get(id);
             if (!entry) {
@@ -163,6 +209,29 @@ enum OverlayScript {
           }, true);
           new MutationObserver(onPageChange).observe(document.documentElement, { childList: true, subtree: true });
 
+          // 左右翻页的阅读器多半用 transform 移动页面，不触发滚动事件：手指操作和动画之后的 1 秒里每一帧都对齐译文
+          let trackUntil = 0;
+          let tracking = false;
+          const trackFrame = () => {
+            reposition();
+            if (performance.now() < trackUntil) {
+              requestAnimationFrame(trackFrame);
+            } else {
+              tracking = false;
+            }
+          };
+          const onInteraction = () => {
+            scheduleScan();
+            trackUntil = performance.now() + 1000;
+            if (!tracking && images.size > 0) {
+              tracking = true;
+              requestAnimationFrame(trackFrame);
+            }
+          };
+          for (const type of ['touchstart', 'touchmove', 'touchend', 'click', 'keydown', 'transitionstart', 'transitionend', 'animationend']) {
+            window.addEventListener(type, onInteraction, { capture: true, passive: true });
+          }
+
           window.__mangaTranslate = {
             // ---------- 按图片翻译 ----------
             setAuto(enabled) {
@@ -170,9 +239,9 @@ enum OverlayScript {
               if (enabled) scheduleScan();
             },
             // pending 时在图片右上角放一个小标记，翻译超过 0.6 秒才显出来，秒出的图不会闪一下；
-            // failed 不再自动重试；传空值表示重新排队
+            // failed 不再自动重试；waiting 是 canvas 截到空白，等 App 过一会儿重新排队；传空值表示重新排队
             markState(id, state) {
-              const img = imageById(id);
+              const img = elementById(id);
               if (!img) return;
               if (state) img.dataset.mtState = state; else delete img.dataset.mtState;
               const entry = entryFor(id);
@@ -205,6 +274,21 @@ enum OverlayScript {
               }
               entry.width = 0;
               place(id, entry);
+            },
+
+            // 截取 canvas 前调用：它还完整停在原处就藏起译文层，返回它在可视区域里的位置；
+            // 已经翻走或正在动就返回 null。截完要调 show()
+            prepareSnapshot(id) {
+              const el = elementById(id);
+              if (!el || !el.isConnected) return null;
+              const rect = el.getBoundingClientRect();
+              const area = visibleArea();
+              if (!fullyVisible(rect, area) || canvasMoves.get(id)?.key !== rectKey(rect)) return null;
+              layer().style.visibility = 'hidden';
+              return JSON.stringify({
+                x: rect.left - area.left, y: rect.top - area.top, width: rect.width, height: rect.height,
+                viewWidth: area.width, viewHeight: area.height,
+              });
             },
 
             // ---------- 按屏幕翻译 ----------

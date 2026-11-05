@@ -1,4 +1,5 @@
 import CoreGraphics
+import CryptoKit
 import Foundation
 import ImageIO
 import MangaCore
@@ -33,6 +34,12 @@ enum ImagePipeline {
         else {
             throw MangaCoreError("无法解码图片")
         }
+        return try await prepare(image: image, language: language)
+    }
+
+    /// 已经是图像的（比如截取的 canvas 区域）直接切段识别
+    @concurrent
+    nonisolated static func prepare(image: CGImage, language: SourceLanguage) async throws -> PreparedImage {
         let rects = Segmenting.segmentRects(width: image.width, height: image.height)
         var segments: [PreparedSegment] = []
         for (index, rect) in rects.enumerated() {
@@ -46,6 +53,27 @@ enum ImagePipeline {
                 characterSize: analysis.characterSize))
         }
         return PreparedImage(width: image.width, height: image.height, segments: segments)
+    }
+}
+
+extension ImagePipeline {
+    /// 截图内容的指纹，用作缓存键：canvas 画的页面没有图片地址，同样的画面算出同样的值。
+    /// 重新画到一块自己的位图里再算，裁剪出来的 CGImage 可能还连着整张截图的数据
+    @concurrent
+    nonisolated static func contentFingerprint(of image: CGImage) async -> String {
+        let width = image.width
+        let height = image.height
+        guard width > 0, height > 0,
+              let context = CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else {
+            return UUID().uuidString
+        }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let pixels = context.data else { return UUID().uuidString }
+        let digest = SHA256.hash(data: UnsafeRawBufferPointer(start: pixels, count: context.bytesPerRow * height))
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }
 

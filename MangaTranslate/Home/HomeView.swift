@@ -45,7 +45,12 @@ struct HomeView: View {
                 if arguments.contains("-seedShelf"), bookmarks.items.isEmpty {
                     seedShelfForPreview()
                 }
-                // 调试用：启动参数带 -openDemo 时直接打开示例页，带 -openSettings 时打开设置
+                // 调试用：启动参数带 -openDemo 时直接打开示例页，带 -openSettings 时打开设置，
+                // -openURL <网址> 直接打开那个网页
+                if let address = UserDefaults.standard.string(forKey: "openURL"), let url = URL(string: address),
+                   path.isEmpty {
+                    path.append(.web(url))
+                }
                 if arguments.contains("-openDemo"), path.isEmpty {
                     path.append(.demo)
                 }

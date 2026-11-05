@@ -7,13 +7,29 @@ import WebKit
 /// 网页脚本报上来的一张候选图片
 struct ImageCandidate: Decodable {
     var id: String
+    /// canvas 画的页面没有地址，是空字符串
     var src: String
-    /// 0 表示在屏幕上；正数表示在屏幕下方多远（CSS 像素）
+    /// 0 表示在屏幕上；正数表示离屏幕多远（CSS 像素）
     var distance: Double
+    /// "canvas" 表示漫画画在 canvas 上（比如マガポケ），只能截取它在屏幕上的区域；其余是普通图片
+    var kind: String?
+
+    var isCanvas: Bool { kind == "canvas" }
+}
+
+/// canvas 在可视区域里的位置和可视区域的大小，单位是 CSS 像素
+private struct CanvasFrame: Decodable {
+    var x: Double
+    var y: Double
+    var width: Double
+    var height: Double
+    var viewWidth: Double
+    var viewHeight: Double
 }
 
 /// 自动翻译：网页脚本报告屏幕附近的漫画图片，这里按离屏幕的远近排队，同时最多翻译 2 张
-///（局域网里的本地模型一次只翻 1 张）。翻译过的图存进缓存，再次出现时直接显示
+///（局域网里的本地模型一次只翻 1 张）。翻译过的图存进缓存，再次出现时直接显示。
+/// 画在 canvas 上的页面等它完整停在屏幕上后截取那块区域来翻译，按截图内容缓存
 @Observable
 final class AutoTranslator {
     /// 排队中和正在翻译的图片数，用来显示进度
@@ -36,6 +52,10 @@ final class AutoTranslator {
     /// 换页或清除译文时加一，丢弃旧页面上还没完成的结果
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var userAgent: String?
+    /// 截图里没找到文字的 canvas 已经重新截过几次：可能截的时候还没画好
+    @ObservationIgnored private var blankRetries: [String: Int] = [:]
+    /// 截图要先藏起译文层，同一时间只截一张
+    @ObservationIgnored private var snapshotChain: Task<CGImage?, Never>?
     /// 只记录数量和耗时，不记录图片地址和文字内容
     @ObservationIgnored private let logger = Logger(subsystem: "io.github.starryplay-xp.MangaTranslate", category: "auto")
 
@@ -72,6 +92,7 @@ final class AutoTranslator {
         queue.removeAll()
         inFlight.removeAll()
         handled.removeAll()
+        blankRetries.removeAll()
         updateCount()
     }
 
@@ -111,12 +132,24 @@ final class AutoTranslator {
         let service = settings.activeService
         let sendImage = settings.effectiveSendImage
         let dryRun = settings.dryRun
+
+        // canvas 先截图：缓存按截图内容算。截不到说明已经翻走了，去掉标记，等它再停到屏幕上
+        var snapshot: CGImage?
+        var cacheSource = candidate.src
+        if candidate.isCanvas {
+            guard let image = await snapshotCanvas(candidate.id) else {
+                await mark(candidate.id, state: nil, generation: generation)
+                return
+            }
+            snapshot = image
+            cacheSource = "canvas:" + (await ImagePipeline.contentFingerprint(of: image))
+        }
         let cacheKey = TranslationCache.key(
-            src: candidate.src, language: language, sendImage: sendImage, service: service.config)
+            src: cacheSource, language: language, sendImage: sendImage, service: service.config)
 
         if !dryRun, let cached = TranslationCache.load(cacheKey) {
             logger.info("图片 \(candidate.id, privacy: .public)：命中缓存，\(cached.items.count) 处译文")
-            await render(candidate.id, items: cached.items, generation: generation)
+            await render(candidate, items: cached.items, generation: generation)
             return
         }
         var client: (any LLMClient)?
@@ -137,8 +170,13 @@ final class AutoTranslator {
         await mark(candidate.id, state: "pending", generation: generation)
         let started = ContinuousClock.now
         do {
-            let data = try await loadImage(candidate.src)
-            let prepared = try await ImagePipeline.prepare(imageData: data, language: language)
+            let prepared: PreparedImage
+            if let snapshot {
+                prepared = try await ImagePipeline.prepare(image: snapshot, language: language)
+            } else {
+                let data = try await loadImage(candidate.src)
+                prepared = try await ImagePipeline.prepare(imageData: data, language: language)
+            }
             logger.info("图片 \(candidate.id, privacy: .public)：\(prepared.width)×\(prepared.height)，\(prepared.segments.count) 段有文字")
             let host = webView.url?.host() ?? "local"
             var items: [ImageOverlayItem] = []
@@ -166,7 +204,7 @@ final class AutoTranslator {
             }
             let seconds = (ContinuousClock.now - started) / .seconds(1)
             logger.info("图片 \(candidate.id, privacy: .public)：贴了 \(items.count) 处译文，用时 \(seconds, format: .fixed(precision: 1)) 秒")
-            await render(candidate.id, items: items, generation: generation)
+            await render(candidate, items: items, generation: generation)
         } catch let error as LLMServiceError where error.stopsWholeRun {
             // 去掉“翻译中”角标，问题解决后这张图还能重新翻译
             await mark(candidate.id, state: nil, generation: generation)
@@ -189,8 +227,19 @@ final class AutoTranslator {
         onBlocked?(message, needsSettings)
     }
 
-    private func render(_ id: String, items: [ImageOverlayItem], generation: Int) async {
+    private func render(_ candidate: ImageCandidate, items: [ImageOverlayItem], generation: Int) async {
         guard generation == self.generation else { return }
+        let id = candidate.id
+        // canvas 没找到文字可能是还没画好（截到空白或加载图），过 2.5 秒再截，最多再截两次
+        if candidate.isCanvas, items.isEmpty, blankRetries[id, default: 0] < 2 {
+            blankRetries[id, default: 0] += 1
+            await mark(id, state: "waiting", generation: generation)
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(2.5))
+                await self?.mark(id, state: nil, generation: generation)
+            }
+            return
+        }
         handled.insert(id)
         guard let json = try? String(decoding: JSONEncoder().encode(items), as: UTF8.self) else { return }
         _ = try? await webView.runIsolatedScript(
@@ -203,6 +252,40 @@ final class AutoTranslator {
             ? "window.__mangaTranslate.markState(id, null)"
             : "window.__mangaTranslate.markState(id, state)"
         _ = try? await webView.runIsolatedScript(source, arguments: ["id": id, "state": state ?? ""])
+    }
+
+    /// 截取 canvas 当前在屏幕上的区域。截图前藏起译文层，免得把贴上去的中文也截进去；
+    /// canvas 已经不完整在屏幕上（翻走了、被移除）时返回 nil
+    private func snapshotCanvas(_ id: String) async -> CGImage? {
+        let previous = snapshotChain
+        let task = Task { [webView] () -> CGImage? in
+            _ = await previous?.value
+            guard let json = try? await webView.runIsolatedScript(
+                "return window.__mangaTranslate.prepareSnapshot(id)", arguments: ["id": id]) as? String
+            else {
+                return nil
+            }
+            // 网页已经藏起译文层，下面不管成败都要放出来
+            let frame = try? JSONDecoder().decode(CanvasFrame.self, from: Data(json.utf8))
+            var snapshot: UIImage?
+            if frame != nil {
+                let configuration = WKSnapshotConfiguration()
+                configuration.afterScreenUpdates = true
+                snapshot = try? await webView.takeSnapshot(configuration: configuration)
+            }
+            _ = try? await webView.runIsolatedScript("window.__mangaTranslate.show()")
+            guard let frame, let image = snapshot?.cgImage, frame.viewWidth > 0, frame.viewHeight > 0 else { return nil }
+            // 截图是整个可视区域，按比例换算到像素再裁出 canvas
+            let scaleX = Double(image.width) / frame.viewWidth
+            let scaleY = Double(image.height) / frame.viewHeight
+            let rect = CGRect(
+                x: frame.x * scaleX, y: frame.y * scaleY, width: frame.width * scaleX, height: frame.height * scaleY
+            ).integral.intersection(CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            guard rect.width >= 100, rect.height >= 100 else { return nil }
+            return image.cropping(to: rect)
+        }
+        snapshotChain = task
+        return await task.value
     }
 
     /// 先由 App 直接下载；blob: 地址或下载被拒绝时，退回让网页自己读取
