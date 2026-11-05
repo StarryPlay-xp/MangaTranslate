@@ -41,11 +41,29 @@ enum OverlayScript {
             'font-weight:600', 'word-break:break-all', 'pointer-events:auto', 'transition:opacity 0.15s',
           ].join(';');
 
+          // 拟声词、标题这类大字：半透明白底的小标签贴在原文左上角，底色只包住译文，不挡画面；一律横排
+          const labelStyle = [
+            'position:absolute', 'box-sizing:border-box', 'width:max-content', 'padding:1px 6px',
+            'border-radius:6px', 'background:rgba(255,255,255,0.82)', 'box-shadow:0 0 0 1px rgba(0,0,0,0.18)',
+            'color:#111', 'line-height:1.3', 'font-family:-apple-system,"PingFang SC",sans-serif',
+            'font-weight:700', 'text-align:left', 'word-break:break-all', 'pointer-events:auto',
+            'transition:opacity 0.15s',
+          ].join(';');
+          const labelFontRatio = \(OverlayItem.labelFontRatio);
+
+          // 小标签的字号和最大宽度跟着图片（或屏幕）宽度走；超出右边、下边时往回挪
+          const placeLabel = (el, left, top, fontSize, maxWidth, areaWidth, areaHeight) => {
+            el.style.fontSize = Math.max(Math.round(fontSize), 11) + 'px';
+            el.style.maxWidth = Math.round(maxWidth) + 'px';
+            el.style.left = Math.max(0, Math.min(left, areaWidth - el.offsetWidth)) + 'px';
+            el.style.top = Math.max(0, Math.min(top, areaHeight - el.offsetHeight)) + 'px';
+          };
+
           // 点一下译文可以临时看原文，再点一下恢复
-          const textBox = (text, vertical) => {
+          const textBox = (text, vertical, label) => {
             const el = document.createElement('div');
             el.textContent = text;
-            el.style.cssText = textStyle + (vertical ? ';writing-mode:vertical-rl' : '');
+            el.style.cssText = label ? labelStyle : textStyle + (vertical ? ';writing-mode:vertical-rl' : '');
             el.addEventListener('click', (event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -177,7 +195,17 @@ enum OverlayScript {
             style.height = rect.height + 'px';
             if (Math.abs(rect.width - entry.width) > 1) {
               entry.width = rect.width;
-              for (const [el, item] of entry.texts) fit(el, item.fontScale * rect.width);
+              for (const [el, item] of entry.texts) {
+                if (item.label) {
+                  placeLabel(
+                    el, item.x * rect.width, item.y * rect.height,
+                    Math.min(item.fontScale, labelFontRatio) * rect.width,
+                    Math.min(Math.max(item.width * rect.width, rect.width * 0.35), rect.width * 0.9),
+                    rect.width, rect.height);
+                } else {
+                  fit(el, item.fontScale * rect.width);
+                }
+              }
             }
           };
           const reposition = () => {
@@ -274,11 +302,14 @@ enum OverlayScript {
               entry.box.replaceChildren();
               entry.texts = [];
               for (const item of items) {
-                const el = textBox(item.text, item.vertical);
-                el.style.left = (item.x * 100) + '%';
-                el.style.top = (item.y * 100) + '%';
-                el.style.width = (item.width * 100) + '%';
-                el.style.height = (item.height * 100) + '%';
+                const el = textBox(item.text, item.vertical, item.label);
+                // 小标签的位置在 place() 里按像素算，要知道自己多宽才能不超出图片
+                if (!item.label) {
+                  el.style.left = (item.x * 100) + '%';
+                  el.style.top = (item.y * 100) + '%';
+                  el.style.width = (item.width * 100) + '%';
+                  el.style.height = (item.height * 100) + '%';
+                }
                 entry.box.appendChild(el);
                 entry.texts.push([el, item]);
               }
@@ -315,15 +346,24 @@ enum OverlayScript {
             },
             render(items) {
               const root = layer();
+              const pageWidth = document.documentElement.scrollWidth;
+              const pageHeight = document.documentElement.scrollHeight;
+              const viewWidth = window.visualViewport ? window.visualViewport.width : window.innerWidth;
               for (const item of items) {
-                const el = textBox(item.text, item.vertical);
+                const el = textBox(item.text, item.vertical, item.label);
                 el.dataset.top = item.y;
                 el.dataset.height = item.height;
+                root.appendChild(el);
+                if (item.label) {
+                  placeLabel(
+                    el, item.x, item.y, item.fontSize, Math.min(Math.max(item.width, viewWidth * 0.35), viewWidth * 0.9),
+                    pageWidth, pageHeight);
+                  continue;
+                }
                 el.style.left = item.x + 'px';
                 el.style.top = item.y + 'px';
                 el.style.width = item.width + 'px';
                 el.style.height = item.height + 'px';
-                root.appendChild(el);
                 fit(el, item.fontSize);
               }
             },
@@ -377,6 +417,11 @@ struct OverlayItem: Encodable {
     var text: String
     var vertical: Bool
     var fontSize: Double
+    /// 拟声词、标题这类大字：半透明小标签，不盖住原文
+    var label: Bool
+
+    /// 小标签的字号上限（÷ 图片宽度），和普通对白差不多大
+    static let labelFontRatio = 0.032
 
     /// 把截图上的像素坐标换算到网页文档坐标；框向外扩一点，盖住原文的边缘
     static func items(
@@ -388,6 +433,8 @@ struct OverlayItem: Encodable {
         return blocks.filter(\.shouldOverlay).map { block in
             let rect = block.box.rect.insetBy(dx: -padding, dy: -padding)
             let fontSize = block.characterSize.map { CGFloat($0) } ?? characterSize
+            let label = block.showsAsLabel(imageWidth: imageSize.width, fallbackCharacterSize: characterSize)
+            let size = label ? min(fontSize, imageSize.width * labelFontRatio) : fontSize
             return OverlayItem(
                 x: viewport.left + rect.minX * scaleX,
                 y: viewport.top + rect.minY * scaleY,
@@ -395,7 +442,8 @@ struct OverlayItem: Encodable {
                 height: rect.height * scaleY,
                 text: block.translation,
                 vertical: block.direction == .vertical,
-                fontSize: max(fontSize * scaleX, 10))
+                fontSize: max(size * scaleX, label ? 11 : 10),
+                label: label)
         }
     }
 }

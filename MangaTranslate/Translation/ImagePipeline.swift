@@ -87,6 +87,8 @@ nonisolated struct ImageOverlayItem: Codable, Sendable {
     var vertical: Bool
     /// 字号 ÷ 图片原始宽度
     var fontScale: Double
+    /// 拟声词、标题这类大字：贴一个不挡画面的半透明小标签，不盖住原文。旧缓存里没有这个字段
+    var label: Bool?
 
     static func items(for blocks: [TranslatedBlock], in segment: PreparedSegment, imageWidth: Int, imageHeight: Int)
         -> [ImageOverlayItem]
@@ -106,7 +108,8 @@ nonisolated struct ImageOverlayItem: Codable, Sendable {
                 x: rect.minX / width, y: rect.minY / height,
                 width: rect.width / width, height: rect.height / height,
                 text: block.translation, vertical: block.direction == .vertical,
-                fontScale: fontSize / width)
+                fontScale: fontSize / width,
+                label: block.showsAsLabel(imageWidth: width, fallbackCharacterSize: segment.characterSize))
         }
     }
 }

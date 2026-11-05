@@ -76,7 +76,7 @@ private func renderTranslatedPage(_ page: TranslatedPage) -> String {
         let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
         return "<figure><figcaption>\(caption)</figcaption><a href=\"\(encoded)\" target=\"_blank\"><img src=\"\(encoded)\" alt=\"\"></a></figure>"
     }
-    let kindNames = ["dialogue": "对白", "narration": "旁白", "sfx": "拟声词", "noise": "非剧情", "missing": "模型漏掉"]
+    let kindNames = ["dialogue": "对白", "narration": "旁白", "sfx": "拟声词", "title": "标题大字", "noise": "非剧情", "missing": "模型漏掉"]
     let rows = page.blocks.map { block in
         func cell(_ text: String) -> String { escapeHTML(text).replacingOccurrences(of: "\n", with: "<br>") }
         return "<tr class=\"\(block.kind)\"><td>\(block.id)</td><td>\(kindNames[block.kind] ?? cell(block.kind))</td><td>\(cell(block.ocrText))</td><td>\(cell(block.source))</td><td>\(cell(block.translation))</td></tr>"

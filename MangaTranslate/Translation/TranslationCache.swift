@@ -9,8 +9,9 @@ nonisolated struct CachedImageTranslation: Codable, Sendable {
 /// 已翻译图片的译文缓存，按图片地址和所用的模型服务保存在系统缓存目录。
 /// 重看同一话时直接显示，不再调用模型；换了模型会重新翻译。手机空间不足时系统可能会清掉这些文件
 enum TranslationCache {
-    /// 提示词或贴字规则改了就加一，让旧缓存失效
-    private static let version = 1
+    /// 提示词或贴字规则改了就加一，让旧缓存失效。
+    /// 2：拟声词、标题也贴译文（旧缓存里没有这些块）
+    private static let version = 2
 
     private static var directory: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]

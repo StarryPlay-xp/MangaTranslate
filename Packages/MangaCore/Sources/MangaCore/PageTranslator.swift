@@ -18,7 +18,7 @@ public struct TranslatedBlock: Codable, Sendable {
     /// 模型看图核对后的原文
     public var source: String
     public var translation: String
-    /// dialogue / narration / sfx / noise；模型漏掉的编号记为 missing
+    /// dialogue / narration / sfx / title / noise；模型漏掉的编号记为 missing
     public var kind: String
     /// 块内原文的字号估计（像素），作为译文字号的上限；没认出字的块为 nil
     public var characterSize: Int?
@@ -45,8 +45,25 @@ public struct TranslatedBlock: Codable, Sendable {
         return translated
     }
 
-    /// 需要盖上译文的块
-    public var shouldOverlay: Bool { (kind == "dialogue" || kind == "narration") && !translation.isEmpty }
+    /// 需要贴上译文的块
+    public var shouldOverlay: Bool { Self.overlaidKinds.contains(kind) && !translation.isEmpty }
+
+    /// 对白和旁白：盖住气泡里的原文，也记进前文
+    public var isStory: Bool { kind == "dialogue" || kind == "narration" }
+
+    private static let overlaidKinds: Set<String> = ["dialogue", "narration", "sfx", "title"]
+
+    /// 原文字号达到图片宽度的这个比例，就算排版大字：模型标成了对白或旁白也用小标签显示
+    public static let largeTextRatio = 0.07
+
+    /// 用不挡画面的小标签显示，不盖住原文：拟声词、标题宣传语，以及原文字特别大的块。
+    /// fallbackCharacterSize 是块里没认出字、没有字号估计时用的整页（整段）字号
+    public func showsAsLabel(imageWidth: Double, fallbackCharacterSize: Double) -> Bool {
+        if kind == "sfx" || kind == "title" { return true }
+        guard imageWidth > 0 else { return false }
+        let size = characterSize.map(Double.init) ?? fallbackCharacterSize
+        return size / imageWidth >= Self.largeTextRatio
+    }
 }
 
 public struct PageTranslation: Sendable {
@@ -68,7 +85,7 @@ public struct TranslationMemory: Codable, Sendable {
         for term in page.newTerms where !term.source.isEmpty && !term.translation.isEmpty {
             if !glossary.contains(where: { $0.source == term.source }) { glossary.append(term) }
         }
-        let spoken = page.blocks.filter(\.shouldOverlay).map(\.translation)
+        let spoken = page.blocks.filter { $0.isStory && !$0.translation.isEmpty }.map(\.translation)
         recentLines = Array((recentLines + spoken).suffix(12))
     }
 }
@@ -94,11 +111,12 @@ public struct PageTranslator: Sendable {
         3. 人名、地名、门派、招式等专有名词沿用术语表的译法；遇到术语表里没有的新专有名词，在 new_terms 里给出建议译名。
         4. 网站水印、广告、网址、界面按钮、页码等不属于剧情的文字，kind 填 "noise"，translation 留空。
         5. 拟声词 kind 填 "sfx"，translation 给出简短的中文拟声词。
-        6. 框里其实没有文字时，kind 填 "noise"，source 和 translation 都留空。
+        6. 作品标题、章节标题、宣传语、作者名等排成大字或艺术字的文字，kind 填 "title"，translation 给出简短的中文；和中文写法完全一样的（比如汉字人名），translation 留空。
+        7. 框里其实没有文字时，kind 填 "noise"，source 和 translation 都留空。
 
         只输出 json，不要输出任何解释。每个编号都要出现且只出现一次，id 与编号一致。格式如下：
         {"blocks": [{"id": 1, "source": "核对后的原文", "translation": "中文译文", "kind": "dialogue"}], "new_terms": [{"source": "原文专有名词", "translation": "中文译名"}]}
-        kind 只能是 dialogue（对白）、narration（旁白）、sfx（拟声词）、noise（非剧情文字）之一。
+        kind 只能是 dialogue（对白）、narration（旁白）、sfx（拟声词）、title（标题、宣传语等大字）、noise（非剧情文字）之一。
         """
 
     public func userPrompt(
