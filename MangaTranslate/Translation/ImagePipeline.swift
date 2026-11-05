@@ -15,44 +15,36 @@ nonisolated struct PreparedSegment: Sendable {
     var characterSize: CGFloat
 }
 
-nonisolated struct PreparedImage: Sendable {
-    var width: Int
-    var height: Int
-    /// 只包含有文字的段
-    var segments: [PreparedSegment]
-}
-
+/// 逐段处理一张图：识别完一段就可以先交给模型，不用等整张长图都识别完
 enum ImagePipeline {
     /// 编号图最多 200 万像素：DeepSeek 等模型本来就会缩到约 1300×1300，再大只是浪费流量
     nonisolated static let maxMarkedPixels = 2_000_000
 
-    /// 解码、切段、识别、画编号图都在后台执行
+    /// 在后台解码下载到的图片
     @concurrent
-    nonisolated static func prepare(imageData: Data, language: SourceLanguage) async throws -> PreparedImage {
-        guard let source = CGImageSourceCreateWithData(imageData as CFData, nil),
+    nonisolated static func decode(_ data: Data) async throws -> CGImage {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
         else {
             throw MangaCoreError("无法解码图片")
         }
-        return try await prepare(image: image, language: language)
+        return image
     }
 
-    /// 已经是图像的（比如截取的 canvas 区域）直接切段识别
+    /// 在后台识别第 index 段并画出编号图；这一段里没有归它处理的文字时返回 nil
     @concurrent
-    nonisolated static func prepare(image: CGImage, language: SourceLanguage) async throws -> PreparedImage {
-        let rects = Segmenting.segmentRects(width: image.width, height: image.height)
-        var segments: [PreparedSegment] = []
-        for (index, rect) in rects.enumerated() {
-            guard let crop = image.cropping(to: rect) else { continue }
-            let (analysis, blocks) = try await detectTextBlocks(in: crop, language: language)
-            let owned = Segmenting.ownedBlocks(blocks, segmentIndex: index, in: rects)
-            guard !owned.isEmpty else { continue }
-            let marked = try scaledToFit(renderMarked(image: crop, blocks: owned), maxPixelCount: maxMarkedPixels)
-            segments.append(PreparedSegment(
-                rect: rect, blocks: owned, markedJPEG: try encodeImage(marked, format: .jpeg),
-                characterSize: analysis.characterSize))
-        }
-        return PreparedImage(width: image.width, height: image.height, segments: segments)
+    nonisolated static func prepareSegment(
+        _ index: Int, of rects: [CGRect], in image: CGImage, language: SourceLanguage
+    ) async throws -> PreparedSegment? {
+        let rect = rects[index]
+        guard let crop = image.cropping(to: rect) else { return nil }
+        let (analysis, blocks) = try await detectTextBlocks(in: crop, language: language)
+        let owned = Segmenting.ownedBlocks(blocks, segmentIndex: index, in: rects)
+        guard !owned.isEmpty else { return nil }
+        let marked = try scaledToFit(renderMarked(image: crop, blocks: owned), maxPixelCount: maxMarkedPixels)
+        return PreparedSegment(
+            rect: rect, blocks: owned, markedJPEG: try encodeImage(marked, format: .jpeg),
+            characterSize: analysis.characterSize)
     }
 }
 

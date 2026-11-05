@@ -35,6 +35,10 @@ nonisolated struct ModelService: Codable, Identifiable, Hashable, Sendable {
     /// 地址匹配到要求 Key 的服务商（目前是 DeepSeek）时，没有 Key 就不发请求
     var requiresAPIKey: Bool { config.preset?.requiresAPIKey ?? false }
 
-    /// 同时翻译几张图：局域网里的小模型一次只处理一张，免得排队超时
+    /// 网页文字翻译同时发出的请求数：局域网里的小模型一次只处理一个，免得排队超时
     var maxConcurrentRequests: Int { config.isLocalNetwork ? 1 : 2 }
+
+    /// 自动翻译漫画图片时同时发出的模型请求数：长图的几段、相邻几张图一起翻。
+    /// 局域网里的小模型一次只处理一个
+    var maxConcurrentImageRequests: Int { config.isLocalNetwork ? 1 : 4 }
 }
