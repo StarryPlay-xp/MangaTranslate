@@ -410,11 +410,13 @@ enum OverlayScript {
               }
             },
 
-            // 清除全部译文，图片恢复成未翻译状态
+            // 清除全部译文，图片和 canvas 都恢复成未翻译状态（canvas 也要去掉标记，
+            // 否则换原文语言、清除后再打开自动翻译时不会重新报出来）
             clear() {
               layer().replaceChildren();
               images.clear();
-              for (const img of document.querySelectorAll('img[data-mt-state]')) delete img.dataset.mtState;
+              canvasMoves.clear();
+              for (const el of document.querySelectorAll('[data-mt-state]')) delete el.dataset.mtState;
               scheduleScan();
             },
 
