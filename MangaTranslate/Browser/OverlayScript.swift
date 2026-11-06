@@ -435,15 +435,8 @@ enum OverlayScript {
         """
 }
 
-/// 网页可视区域在文档中的位置，单位是 CSS 像素
-struct Viewport: Decodable {
-    var left: Double
-    var top: Double
-    var width: Double
-    var height: Double
-    /// 版面宽度：iPad 转屏、调整窗口时会变，双指缩放不变
-    var layoutWidth: Double
-
+/// 读出网页可视区域（Viewport 定义在 MangaCore，和 Mac 小助手共用）
+extension Viewport {
     static let readScript = """
         const v = window.visualViewport;
         const layoutWidth = document.documentElement.clientWidth;
@@ -451,51 +444,4 @@ struct Viewport: Decodable {
           ? { left: v.pageLeft, top: v.pageTop, width: v.width, height: v.height, layoutWidth }
           : { left: window.scrollX, top: window.scrollY, width: window.innerWidth, height: window.innerHeight, layoutWidth });
         """
-}
-
-/// "只翻译这一屏"贴到网页上的一处译文，坐标已换算成文档坐标
-struct OverlayItem: Encodable {
-    var x: Double
-    var y: Double
-    var width: Double
-    var height: Double
-    var text: String
-    var vertical: Bool
-    var fontSize: Double
-    /// 拟声词、标题这类大字：半透明小标签，不盖住原文
-    var label: Bool
-    /// 盖住原文时铺的底色和字色（周围是纯色时取那个颜色）；没有时用白底黑字
-    var background: String?
-    var textColor: String?
-
-    /// 小标签的字号上限（÷ 图片宽度）：字号本身跟这一页的对白一样，这里只防止整页都是大字时标签太大
-    static let labelFontRatio = 0.05
-    /// 小标签的最小字号（CSS 像素），手机上看得清
-    static let labelMinFont = 13
-
-    /// 把截图上的像素坐标换算到网页文档坐标；框向外扩一点，盖住原文的边缘
-    static func items(
-        for blocks: [TranslatedBlock], imageSize: CGSize, characterSize: CGFloat, covers: [Int: CoverColor],
-        viewport: Viewport
-    ) -> [OverlayItem] {
-        let scaleX = viewport.width / imageSize.width
-        let scaleY = viewport.height / imageSize.height
-        let padding = TextCover.padding(characterSize: characterSize)
-        return blocks.filter(\.shouldOverlay).map { block in
-            let rect = block.box.rect.insetBy(dx: -padding, dy: -padding)
-            let fontSize = block.characterSize.map { CGFloat($0) } ?? characterSize
-            let cover = covers[block.id]
-            let label = block.showsAsLabel(cover: cover)
-            let size = label ? min(fontSize, characterSize, imageSize.width * labelFontRatio) : fontSize
-            return OverlayItem(
-                x: viewport.left + rect.minX * scaleX,
-                y: viewport.top + rect.minY * scaleY,
-                width: rect.width * scaleX,
-                height: rect.height * scaleY,
-                text: block.translation,
-                vertical: block.direction == .vertical,
-                fontSize: max(size * scaleX, label ? CGFloat(labelMinFont) : 10),
-                label: label, background: label ? nil : cover?.hex, textColor: label ? nil : cover?.textHex)
-        }
-    }
 }
