@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "漫译",
+  "short_name": "漫译",
+  "version": "0.1.0",
+  "description": "在 Chrome 里自动翻译日漫、韩漫网页，译文贴在原图上。需要配合 Mac 小助手使用。",
+  "minimum_chrome_version": "120",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0t+gMIqg5XLitTOqPlM7qXeYBjFJBoT+Twjx4rzb5jWGXM11N02P6+O9pA0vkARdl+QKeWkZoN4KOM5/FIfdGr+p21PWcy+1ZlauIw8AeA+xWAgbggZ4l59pH/rHfPyEps6Y+zsbXcxiqrUN7hN4fIADqe+luJnvSaRIbN1x3X6Z8MePpEnc3FlSHFlmvIQqTXnRS22f5dOW9fhjejX/MgcQ7cnwz27GJA7XoMvuwqPhRGHwxK1IlBdv95DuP6PbH+3Agq4tbPXiROGAqMG7A2iC9V4Uj+khuMwaHh5X8ASO7BwFFt1/QTCKurjLw5eKGrZm7vxX9FXdW+j1d2aILQIDAQAB",
+  "permissions": ["storage", "scripting", "nativeMessaging", "declarativeNetRequestWithHostAccess"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": {
+    "default_title": "漫译",
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png" }
+  },
+  "options_page": "options.html",
+  "icons": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" }
+}

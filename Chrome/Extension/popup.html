@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="ui.css">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="tone">
+    <div class="row between">
+      <h1>漫译</h1>
+      <div class="row small" id="helper-line"><span class="dot" id="helper-dot"></span><span id="helper-text">正在连接小助手…</span></div>
+    </div>
+  </header>
+
+  <main class="stack">
+    <div class="bubble error" id="blocked" hidden>
+      <strong>翻译已暂停</strong>
+      <div id="blocked-text"></div>
+      <div class="row" style="margin-top:8px">
+        <button class="btn small" id="retry">重试</button>
+        <button class="btn small" id="open-settings-blocked">去设置</button>
+      </div>
+    </div>
+
+    <div class="bubble" id="unsupported" hidden>这个页面不能翻译。打开漫画网站后再点漫译图标。</div>
+
+    <section class="panel stack" id="site-panel" hidden>
+      <div class="muted small" id="host"></div>
+      <div class="row between">
+        <div>
+          <div class="title">自动翻译本站漫画</div>
+          <div class="muted small">滚动或翻页时自动识别、翻译屏幕附近的漫画</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="auto"><span></span></label>
+      </div>
+      <div class="row between">
+        <div class="title">原文语言</div>
+        <div class="segmented" id="language">
+          <button data-value="japanese">日语</button>
+          <button data-value="korean">韩语</button>
+        </div>
+      </div>
+      <div class="row between">
+        <div>
+          <div class="title">网页文字翻译</div>
+          <div class="muted small">把标题、简介、按钮上的文字也换成中文</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="page-text"><span></span></label>
+      </div>
+      <div class="muted small" id="pending" hidden></div>
+    </section>
+
+    <div class="row" id="actions" hidden>
+      <button class="btn primary" id="screen" style="flex:1">只翻译这一屏</button>
+      <button class="btn" id="clear">清除译文</button>
+    </div>
+
+    <div class="bubble small" id="last-error" hidden></div>
+    <div class="bubble small" id="dry-run" hidden>试运行中：不调用模型，只显示识别出的原文。可在设置里关闭。</div>
+
+    <footer class="row between small">
+      <span class="muted" id="usage"></span>
+      <button class="link" id="open-settings">设置</button>
+    </footer>
+  </main>
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

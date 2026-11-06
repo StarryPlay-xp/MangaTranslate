@@ -1,0 +1,94 @@
+/* 漫画分镜风：纸白、墨黑、网点灰、印刷品红；方角粗线、硬阴影（和 App 的 Theme.swift 一致） */
+:root {
+  --ink: #000;
+  --paper: #fff;
+  --tone: #c8c8ce;
+  --muted: #5c5c63;
+  --magenta: #e4007f;
+  --shadow: #000;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --ink: #f2f2f2; --paper: #17171a; --tone: #3d3d44; --muted: #a3a3ab; --magenta: #ff2e96; --shadow: #4a4a52; }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif;
+  letter-spacing: 0;
+}
+h1, h2, h3 { margin: 0; font-weight: 800; }
+button, input, select { font: inherit; color: inherit; letter-spacing: 0; }
+.panel {
+  border: 2px solid var(--ink);
+  background: var(--paper);
+  box-shadow: 4px 4px 0 var(--shadow);
+  padding: 14px 16px;
+}
+.tone {
+  background-color: var(--paper);
+  background-image: radial-gradient(var(--tone) 1px, transparent 1.2px);
+  background-size: 6px 6px;
+}
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.row { display: flex; align-items: center; gap: 10px; }
+.row.between { justify-content: space-between; }
+.stack > * + * { margin-top: 10px; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 36px; padding: 6px 14px;
+  border: 2px solid var(--ink); background: var(--paper); color: var(--ink);
+  box-shadow: 3px 3px 0 var(--shadow);
+  font-weight: 700; cursor: pointer; border-radius: 0;
+}
+.btn:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--shadow); }
+.btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--shadow); }
+.btn:disabled { opacity: .45; cursor: default; transform: none; box-shadow: 3px 3px 0 var(--shadow); }
+.btn.primary { background: var(--magenta); border-color: var(--ink); color: #fff; }
+.btn.block { width: 100%; }
+.btn.small { min-height: 28px; padding: 2px 10px; font-size: 12px; box-shadow: 2px 2px 0 var(--shadow); }
+.link { background: none; border: 0; padding: 0; color: var(--magenta); font-weight: 700; cursor: pointer; text-decoration: underline; }
+
+/* 开关：方形滑块 */
+.switch { position: relative; width: 46px; height: 26px; flex: none; }
+.switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; z-index: 1; }
+.switch span {
+  position: absolute; inset: 0; border: 2px solid var(--ink); background: var(--paper); transition: background .15s;
+}
+.switch span::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; background: var(--ink);
+  transition: transform .15s;
+}
+.switch input:checked + span { background: var(--magenta); }
+.switch input:checked + span::after { transform: translateX(20px); background: #fff; }
+.switch input:focus-visible + span { outline: 2px solid var(--magenta); outline-offset: 2px; }
+
+/* 分段选择（日 / 韩） */
+.segmented { display: inline-flex; border: 2px solid var(--ink); }
+.segmented button { border: 0; background: var(--paper); padding: 3px 12px; font-weight: 700; cursor: pointer; min-width: 44px; }
+.segmented button + button { border-left: 2px solid var(--ink); }
+.segmented button.on { background: var(--ink); color: var(--paper); }
+
+/* 对话气泡式提示 */
+.bubble {
+  position: relative; border: 2px solid var(--ink); padding: 8px 12px; background: var(--paper); border-radius: 14px 14px 14px 3px;
+}
+.bubble.error { border-color: var(--magenta); }
+.bubble.error strong { color: var(--magenta); }
+
+.dot { width: 9px; height: 9px; border: 2px solid var(--ink); flex: none; }
+.dot.ok { background: #1fa45a; }
+.dot.bad { background: var(--magenta); }
+
+input[type=text], input[type=password], input[type=number], select {
+  width: 100%; min-height: 36px; padding: 6px 10px; border: 2px solid var(--ink); background: var(--paper); border-radius: 0;
+}
+input:focus, select:focus { outline: 2px solid var(--magenta); outline-offset: 1px; }
+label.field { display: block; }
+label.field > span { display: block; font-weight: 700; margin-bottom: 4px; }
+hr { border: 0; border-top: 2px solid var(--ink); margin: 14px 0; }
+[hidden] { display: none !important; }

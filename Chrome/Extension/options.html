@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>漫译设置</title>
+  <link rel="stylesheet" href="ui.css">
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <header class="tone"><div class="wrap"><h1>漫译设置</h1></div></header>
+  <main class="wrap stack">
+    <section class="panel stack" id="helper-panel">
+      <div class="row between">
+        <h2>Mac 小助手</h2>
+        <div class="row small"><span class="dot" id="helper-dot"></span><span id="helper-text">正在连接…</span></div>
+      </div>
+      <p class="muted small">识别图片文字和调用模型都由这台 Mac 上的小助手完成。设置、术语表、译文缓存和 Key 都只存在这台 Mac 上，Key 存在 Mac 钥匙串里。</p>
+      <div class="bubble error" id="install" hidden>
+        <strong>还没有连上小助手</strong>
+        <div id="install-error" class="small"></div>
+        <div class="small" style="margin-top:6px">安装方法：在"终端"里进入漫译项目文件夹，运行 <code>Chrome/install.sh</code>，然后完全退出 Chrome 再重新打开。</div>
+        <div class="small">本插件的 ID：<code id="extension-id"></code></div>
+        <button class="btn small" id="reconnect" style="margin-top:8px">重新连接</button>
+      </div>
+    </section>
+
+    <section class="panel stack" id="services-panel" hidden>
+      <div class="row between">
+        <h2>模型服务</h2>
+        <button class="btn small" id="add-service">添加服务</button>
+      </div>
+      <p class="muted small">翻译时用选中的那一个。默认是 DeepSeek；也可以填任意 OpenAI 兼容或 Anthropic 格式的服务，包括局域网里的本地模型。</p>
+      <div id="services" class="stack"></div>
+      <label class="row between">
+        <span><strong>把图片一起发给模型</strong><br><span class="muted small">模型看着图核对原文，准确率更高；模型不能看图时自动只发文字</span></span>
+        <span class="switch"><input type="checkbox" id="send-image"><span></span></span>
+      </label>
+    </section>
+
+    <section class="panel stack" id="editor" hidden>
+      <h2 id="editor-title">编辑服务</h2>
+      <div class="grid">
+        <label class="field"><span>名称</span><input type="text" id="f-name" placeholder="比如：DeepSeek"></label>
+        <label class="field"><span>接口格式</span>
+          <select id="f-format"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic</option></select>
+        </label>
+        <label class="field wide"><span>请求地址</span><input type="text" id="f-url" placeholder="https://api.deepseek.com"></label>
+        <label class="field"><span>模型</span><input type="text" id="f-model" placeholder="deepseek-flash"></label>
+        <label class="field"><span>等待回复最长（秒）</span><input type="number" id="f-timeout" min="10" max="900" step="10"></label>
+        <label class="field wide"><span>API Key</span><input type="password" id="f-key" autocomplete="off" placeholder="粘贴 Key；留空表示不改"></label>
+      </div>
+      <div class="row small">
+        <label class="row"><input type="checkbox" id="f-images"> 模型能看图</label>
+        <label class="row"><input type="checkbox" id="f-json"> JSON 模式</label>
+      </div>
+      <p class="muted small" id="key-note"></p>
+      <div class="bubble small" id="test-result" hidden></div>
+      <div class="row">
+        <button class="btn primary" id="save">保存并使用</button>
+        <button class="btn" id="test">测试连接</button>
+        <button class="btn" id="cancel">取消</button>
+        <span style="flex:1"></span>
+        <button class="btn small" id="clear-key" hidden>删除已保存的 Key</button>
+      </div>
+    </section>
+
+    <section class="panel stack" id="usage-panel" hidden>
+      <div class="row between">
+        <h2>DeepSeek 用量</h2>
+        <button class="btn small" id="clear-usage">清除记录</button>
+      </div>
+      <p class="muted small">按 DeepSeek 官方价格估算（区分闲时和高峰），只记每天的合计，不记内容。和 App 里的用量分开统计。</p>
+      <table id="usage-table"><thead><tr><th></th><th>次数</th><th>输入 token</th><th>输出 token</th><th>费用</th></tr></thead><tbody></tbody></table>
+    </section>
+
+    <section class="panel stack">
+      <h2>已开启的网站</h2>
+      <p class="muted small">在网站上点漫译图标就能开启。插件只在这些网站上运行。</p>
+      <div id="sites" class="stack"></div>
+    </section>
+
+    <section class="panel stack">
+      <label class="row between">
+        <span><strong>试运行</strong><br><span class="muted small">不调用模型、不花钱，译文位置显示识别出的原文，用来检查找图和贴字</span></span>
+        <span class="switch"><input type="checkbox" id="dry-run"><span></span></span>
+      </label>
+    </section>
+  </main>
+  <script src="options.js" type="module"></script>
+</body>
+</html>

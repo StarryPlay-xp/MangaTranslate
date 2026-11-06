@@ -8,6 +8,7 @@
 - `Packages/MangaCore/`：App 和验证工具共用的核心逻辑（文字识别、合并文字块、编号图、大模型翻译）
 - `Config/Info.plist`：Info.plist 里写不进项目设置的部分（允许用 http:// 访问局域网、iPad 上只开一个窗口），编译时自动合并
 - `Tools/OCRProbe/`：Mac 上的识别与翻译验证工具，用法见它的 README
+- `Chrome/`：Mac 上 Chrome 用的漫译插件和它的 Mac 小助手，安装和用法见 `Chrome/README.md`
 - `samples/`：验证用的截图，不提交到仓库
 
 ## 在模拟器里运行
